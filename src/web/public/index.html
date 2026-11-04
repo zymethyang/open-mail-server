@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Email Server</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
+
+    <section id="setup-screen" class="gate" hidden>
+      <div class="gate-copy">
+        <p class="eyebrow">Email Server</p>
+        <h1>Host mail on your company domain</h1>
+        <p>This installation serves one organization. Messages stay on this server, and employees can use the web mailbox or a mail client.</p>
+      </div>
+      <form id="setup-form" class="panel">
+        <h2>Create the administrator</h2>
+        <div id="setup-summary" class="error-summary" tabindex="-1" hidden></div>
+        <label for="setup-organization">Organization name</label>
+        <input id="setup-organization" name="organization" autocomplete="organization" required maxlength="80">
+        <label for="setup-domain">Company domain</label>
+        <input id="setup-domain" name="domain" autocomplete="off" required placeholder="acme.com">
+        <p class="hint">Use the domain this VPS will answer for. After setup, publish an MX record that points here.</p>
+        <label for="setup-name">Your name</label>
+        <input id="setup-name" name="name" autocomplete="name" required maxlength="80">
+        <label for="setup-address">Email address</label>
+        <input id="setup-address" name="email" autocomplete="username" required placeholder="you@acme.com">
+        <label for="setup-password">Password</label>
+        <input id="setup-password" name="password" type="password" autocomplete="new-password" required minlength="8">
+        <p class="hint" id="setup-password-hint">Use at least 8 characters. This signs you in to the web console, SMTP, IMAP, and POP3.</p>
+        <div class="form-actions"><button class="primary-button" type="submit">Create administrator</button></div>
+      </form>
+    </section>
+
+    <section id="sign-in-screen" class="gate" hidden>
+      <div class="gate-copy">
+        <p class="eyebrow">Email Server</p>
+        <h1 id="sign-in-title">Sign in</h1>
+        <p id="sign-in-detail">Use the mailbox created for this company domain.</p>
+      </div>
+      <form id="sign-in-form" class="panel">
+        <h2>Welcome back</h2>
+        <div id="sign-in-summary" class="error-summary" tabindex="-1" hidden></div>
+        <div id="sign-in-password-step">
+          <label for="sign-in-address">Email address</label>
+          <input id="sign-in-address" name="email" autocomplete="username" required>
+          <label for="sign-in-password">Password</label>
+          <input id="sign-in-password" name="password" type="password" autocomplete="current-password" required>
+        </div>
+        <div id="sign-in-code-step" hidden>
+          <label for="sign-in-code">Authenticator code</label>
+          <input id="sign-in-code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]*">
+          <p class="hint">Open the authenticator app and enter the 6 digit code.</p>
+        </div>
+        <div class="form-actions">
+          <button class="primary-button" type="submit">Sign in</button>
+          <button id="sign-in-back" class="quiet-button" type="button" hidden>Use password</button>
+        </div>
+      </form>
+    </section>
+
+    <div id="application-shell" class="shell" hidden>
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div>
+            <p class="eyebrow">Email Server</p>
+            <strong id="organization-label">Company</strong>
+          </div>
+        </div>
+        <nav id="primary-navigation" aria-label="Primary"></nav>
+        <div class="sidebar-footer">
+          <p id="account-label"></p>
+          <button id="password-button" class="quiet-button" type="button">Security</button>
+          <button id="sign-out-button" class="quiet-button" type="button">Sign out</button>
+        </div>
+      </aside>
+      <main id="main-content" class="main" tabindex="-1"></main>
+    </div>
+
+    <script src="/application.js"></script>
+  </body>
+</html>

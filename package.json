@@ -1,0 +1,22 @@
+{
+  "name": "email-server",
+  "version": "1.0.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Open source self-hosted email server for one company domain.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/application.js",
+    "check": "tsc --noEmit",
+    "test": "tsc -p tsconfig.test.json && node --test --test-concurrency=1 \"dist-test/tests/**/*.test.js\"",
+    "verify": "tsc && node dist/verifyMailServer.js"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3"
+  }
+}
