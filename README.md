@@ -21,7 +21,7 @@ From a copy of this project, save the following as `docker-compose.yml`. The rep
 ```yaml
 services:
   email-server:
-    build: .
+    image: zymethyang/open-mail-server:v1.0.0
     restart: unless-stopped
     cap_add:
       - NET_BIND_SERVICE
@@ -38,10 +38,10 @@ services:
       - ./data:/opt/email-server/data
 ```
 
-Start it from that directory:
+Start it from that directory. Compose pulls the published image and does not build one.
 
 ```bash
-docker compose up --build -d
+docker compose up -d
 ```
 
 The mail store on the host is `./data`, mounted at `/opt/email-server/data` in the container. Keep `data/storage-key` with that directory. Stored mail can be opened only when that 32-byte file is present.
