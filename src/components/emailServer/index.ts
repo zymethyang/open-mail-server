@@ -1,4 +1,5 @@
 import type { Server } from "node:net";
+import os from "node:os";
 import tls from "node:tls";
 import type { Configuration } from "../configuration/index.js";
 import { configurationWithListeners, loadConfiguration } from "../configuration/index.js";
@@ -11,8 +12,9 @@ import { ImapServer } from "../imap/index.js";
 import { describeListenError } from "../protocol/utils/listen.js";
 import { Pop3Server } from "../pop3/index.js";
 import { SmtpServer } from "../smtp/index.js";
-import { describeCertificateMaterial, loadCertificate, storeCertificateMaterial } from "../certificate/index.js";
+import { describeCertificateMaterial, ensureSelfSignedCertificate, prepareCertificateMaterial, storeCertificateMaterial } from "../certificate/index.js";
 import { secureOptions } from "../protocol/utils/transportSecurity.js";
+import { createOutgoingSigner } from "../domainKey/index.js";
 import { openSecureStorage } from "../secureStorage/index.js";
 import { SettingsRepository } from "../settings/index.js";
 import { SignInGuard } from "../signIn/index.js";
@@ -23,6 +25,21 @@ import { OrganizationRepository } from "../organization/index.js";
 import { SessionRepository } from "../session/index.js";
 import type { RunningEmailServer } from "./interfaces/runningEmailServer.js";
 export type { RunningEmailServer };
+
+function localCertificateNames(): string[] {
+  const names = ["localhost", "127.0.0.1"];
+  for (const records of Object.values(os.networkInterfaces())) {
+    for (const record of records || []) {
+      const family = String(record.family);
+      const linkLocal = record.address.startsWith("169.254.");
+      if ((family !== "IPv4" && family !== "4") || record.internal || linkLocal || names.includes(record.address)) {
+        continue;
+      }
+      names.push(record.address);
+    }
+  }
+  return names;
+}
 
 async function remember(
   listeners: ListenerStatus[],
@@ -59,8 +76,11 @@ export async function startEmailServer(options?: {
   const activityLogger = new ActivityLogger(configuration.storageDirectory);
   const signInGuard = new SignInGuard();
   const organization = await organizationRepository.read();
-  const certificate = await loadCertificate(configuration.storageDirectory, [
+  const certificate = await ensureSelfSignedCertificate(configuration.storageDirectory, [
+    ...localCertificateNames(),
     configuration.configuredDomain,
+    configuration.publicHostname,
+    storedSettings.publicHostname,
     organization?.domain || ""
   ]);
   const serverName = async (): Promise<string> => {
@@ -74,15 +94,17 @@ export async function startEmailServer(options?: {
     const currentOrganization = await organizationRepository.read();
     return currentOrganization?.domain || configuration.configuredDomain || "localhost";
   };
+  const signingDomain = async () => (await organizationRepository.read())?.domain || configuration.configuredDomain;
   const deliveryService = new DeliveryService({
     storageDirectory: configuration.storageDirectory,
     accountRepository,
     messageRepository,
     activityLogger,
     mailExchangeResolver: options?.mailExchangeResolver || new DnsMailExchangeResolver(),
-    serverDomain: async () => (await organizationRepository.read())?.domain || configuration.configuredDomain,
+    serverDomain: signingDomain,
     announceName: serverName,
-    readRelay: () => settingsRepository.read().then((settings) => settings.relay)
+    readRelay: () => settingsRepository.read().then((settings) => settings.relay),
+    signOutgoingMessage: createOutgoingSigner(configuration.storageDirectory, signingDomain)
   });
   const listeners: ListenerStatus[] = [];
   const servers: Server[] = [];
@@ -91,8 +113,7 @@ export async function startEmailServer(options?: {
     certificate,
     accountRepository,
     signInGuard,
-    activityLogger,
-    productName: configuration.productName
+    activityLogger
   };
 
   await remember(listeners, servers, { name: "SMTP", port: configuration.smtpPort, security: "Plain and STARTTLS", purpose: "Receive mail" }, () =>
@@ -132,11 +153,12 @@ export async function startEmailServer(options?: {
     new Pop3Server({ ...shared, port: configuration.pop3SecurePort, secure: true, messageRepository }).start()
   );
 
-  async function replaceCertificate(certificatePem: string, privateKeyPem: string) {
-    const description = await storeCertificateMaterial(configuration.storageDirectory, certificatePem, privateKeyPem);
-    certificate.privateKey = `${privateKeyPem.trim()}\n`;
-    certificate.certificate = `${certificatePem.trim()}\n`;
-    const material = { privateKey: certificate.privateKey, certificate: certificate.certificate };
+  async function replaceCertificate(certificatePem: string, privateKeyPem: string, intermediateCertificatesPem = "") {
+    const prepared = prepareCertificateMaterial(certificatePem, privateKeyPem, intermediateCertificatesPem);
+    const description = await storeCertificateMaterial(configuration.storageDirectory, certificatePem, privateKeyPem, intermediateCertificatesPem);
+    certificate.privateKey = prepared.privateKey;
+    certificate.certificate = prepared.certificate;
+    const material = { privateKey: prepared.privateKey, certificate: prepared.certificate };
     for (const server of servers) {
       const secureServer = server as tls.Server;
       if (typeof secureServer.setSecureContext === "function") {
@@ -151,6 +173,7 @@ export async function startEmailServer(options?: {
     accountRepository,
     organizationRepository,
     messageRepository,
+    mailboxEvents,
     sessionRepository,
     activityLogger,
     deliveryService,

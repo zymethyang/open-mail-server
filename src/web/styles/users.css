@@ -1,0 +1,2 @@
+.user-filters { grid-template-columns: minmax(220px, 1fr) minmax(180px, 240px); max-width: 720px; }
+.detail-card { max-width: 640px; }

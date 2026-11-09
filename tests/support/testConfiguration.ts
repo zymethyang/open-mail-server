@@ -13,7 +13,6 @@ export function testConfiguration(storageDirectory: string): Configuration {
     pop3Port: 0,
     pop3SecurePort: 0,
     maximumMessageBytes: 25 * 1024 * 1024,
-    productName: "Email Server",
     configuredDomain: "acme.test",
     publicHostname: "",
     secureWeb: false

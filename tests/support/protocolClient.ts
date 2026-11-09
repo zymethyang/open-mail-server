@@ -53,6 +53,35 @@ export function connectPlain(port: number): Promise<net.Socket> {
   });
 }
 
+export function connectTrustedTls(port: number, certificate: string, serverName: string): Promise<tls.TLSSocket> {
+  return new Promise((resolve, reject) => {
+    const socket = tls.connect({
+      host: "127.0.0.1",
+      port,
+      servername: serverName,
+      ca: certificate,
+      rejectUnauthorized: true,
+      minVersion: "TLSv1.2"
+    });
+    socket.once("secureConnect", () => resolve(socket));
+    socket.once("error", reject);
+  });
+}
+
+export function upgradeToTrustedTls(socket: net.Socket, certificate: string, serverName: string): Promise<tls.TLSSocket> {
+  return new Promise((resolve, reject) => {
+    const secureSocket = tls.connect({
+      socket,
+      servername: serverName,
+      ca: certificate,
+      rejectUnauthorized: true,
+      minVersion: "TLSv1.2"
+    });
+    secureSocket.once("secureConnect", () => resolve(secureSocket));
+    secureSocket.once("error", reject);
+  });
+}
+
 export function connectTls(port: number): Promise<tls.TLSSocket> {
   return new Promise((resolve, reject) => {
     const socket = tls.connect({

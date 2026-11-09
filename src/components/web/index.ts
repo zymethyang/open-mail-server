@@ -13,11 +13,17 @@ import { ActivityAction } from "../activity/enums/activityAction.js";
 import { ActivityResult } from "../activity/enums/activityResult.js";
 import { MailProtocol } from "../protocol/enums/mailProtocol.js";
 import { RelaySecurity } from "../settings/enums/relaySecurity.js";
+import { MailFolderName } from "../message/enums/mailFolderName.js";
+import { ApiEndpoint, matchApiEndpoint } from "./enums/apiEndpoint.js";
 import type { MessageRecord } from "../message/interfaces/mailTypes.js";
+import type { MailboxEvents } from "../mailboxEvents/interfaces/mailboxEvents.js";
 import type { PublicAccount } from "../account/interfaces/accountRecord.js";
 import { assertAddressList, isValidAddress, normalizeAddress, parseAddressList } from "../text/index.js";
 import type { DeliveryService } from "../delivery/index.js";
-import { checkPublicPorts } from "../publicPort/index.js";
+import { addressForDnsRecords, checkPublicPorts, locatePublicAddress } from "../publicPort/index.js";
+import { openDomainKey } from "../domainKey/index.js";
+import { createDnsGuide } from "./utils/dnsGuide.js";
+import { displayedImageType } from "./utils/displayedImageType.js";
 import { createMessageIdentifier, createRawMessage, parseRawMessage, sanitizeMessageHtml, type OutboundAttachment } from "../mime/index.js";
 import { createSnippet } from "../mime/index.js";
 import { listen } from "../protocol/utils/listen.js";
@@ -32,6 +38,7 @@ import type { CertificateDescription, ServerCertificate } from "../certificate/i
 import type { SignInGuard } from "../signIn/interfaces/signInGuard.js";
 import type { ListenerStatus } from "./interfaces/listenerStatus.js";
 import { projectDirectoryFrom } from "../configuration/utils/projectDirectory.js";
+import { messageSendError } from "./utils/messageSendError.js";
 import { authenticatorImage, createOneTimePasswordSecret, oneTimePasswordUri } from "../oneTimePassword/index.js";
 export type { ListenerStatus };
 
@@ -43,21 +50,22 @@ interface ServerRequest {
   body: Record<string, unknown>;
 }
 
-function publicDirectory(): string {
-  return path.join(projectDirectoryFrom(import.meta.url), "dist", "web", "public");
-}
+const frontendExtensions = new Set([".html", ".css", ".js", ".svg"]);
 
-function compiledPublicDirectory(): string {
-  return path.join(projectDirectoryFrom(import.meta.url), "src", "web", "public");
+function frontendDirectories(): string[] {
+  const projectDirectory = projectDirectoryFrom(import.meta.url);
+  return [path.join(projectDirectory, "dist", "web"), path.join(projectDirectory, "src", "web")];
 }
 
 async function resolvePublicFile(requestPath: string): Promise<string | null> {
-  const roots = [publicDirectory(), compiledPublicDirectory()];
   const relativePath = requestPath === "/" ? "index.html" : requestPath.replace(/^\/+/, "");
-  for (const root of roots) {
+  for (const root of frontendDirectories()) {
     const candidate = path.resolve(root, relativePath);
     if (!candidate.startsWith(path.resolve(root))) {
       return null;
+    }
+    if (!frontendExtensions.has(path.extname(candidate))) {
+      continue;
     }
     try {
       const info = await stat(candidate);
@@ -172,6 +180,28 @@ function readPendingSignIn(request: http.IncomingMessage): string {
   return pending.address;
 }
 
+function attachmentDownloadHeaders(fileName: string, contentType: string, length: number): Record<string, string | number> {
+  const cleanedName = fileName.replace(/[\r\n"]/g, "").slice(0, 120) || "attachment";
+  const imageType = displayedImageType(contentType, cleanedName);
+  if (imageType) {
+    return {
+      "Content-Type": imageType,
+      "Content-Length": length,
+      "Content-Disposition": `inline; filename="${cleanedName}"`,
+      "Cache-Control": "private, no-store",
+      "X-Content-Type-Options": "nosniff"
+    };
+  }
+  return {
+    "Content-Type": "application/octet-stream",
+    "Content-Length": length,
+    "Content-Disposition": `attachment; filename="${cleanedName}"`,
+    "Content-Security-Policy": "default-src 'none'; sandbox",
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff"
+  };
+}
+
 function sendJson(response: http.ServerResponse, statusCode: number, payload: unknown): void {
   const body = JSON.stringify(payload);
   response.writeHead(statusCode, {
@@ -261,11 +291,18 @@ function requireAdministrator(context: ServerRequest): PublicAccount {
   return account;
 }
 
+const companyApiPrefixes = [ApiEndpoint.Activity, ApiEndpoint.FailedEmail, ApiEndpoint.Mailboxes, ApiEndpoint.Settings, ApiEndpoint.Certificate];
+
+function companyApiPath(pathName: string): boolean {
+  return companyApiPrefixes.some((prefix) => pathName === prefix || pathName.startsWith(`${prefix}/`));
+}
+
 export function createWebServer(dependencies: {
   configuration: Configuration;
   accountRepository: AccountRepository;
   organizationRepository: OrganizationRepository;
   messageRepository: MessageRepository;
+  mailboxEvents: MailboxEvents;
   sessionRepository: SessionRepository;
   activityLogger: ActivityLogger;
   deliveryService: DeliveryService;
@@ -275,21 +312,22 @@ export function createWebServer(dependencies: {
   serverName(): Promise<string>;
   settingsRepository: SettingsRepository;
   readCertificate(): Promise<CertificateDescription>;
-  replaceCertificate(certificatePem: string, privateKeyPem: string): Promise<CertificateDescription>;
+  replaceCertificate(certificatePem: string, privateKeyPem: string, intermediateCertificatesPem?: string): Promise<CertificateDescription>;
 }): http.Server | https.Server {
-  async function hostingGuide(domain: string) {
+  async function hostingGuide(domain: string, publicAddress = "") {
     const hostname = (await dependencies.serverName()) || domain;
+    const discoveredAddress = publicAddress || (await locatePublicAddress(hostname)).address;
+    const address = await addressForDnsRecords(discoveredAddress);
     const incoming = dependencies.listenerStatus.find((item) => item.name === "IMAP" && item.security === "TLS");
     const outgoing = dependencies.listenerStatus.find((item) => item.name === "SMTP" && item.security === "STARTTLS");
+    const domainKey = await openDomainKey(dependencies.configuration.storageDirectory);
+    const dnsGuide = createDnsGuide(domain, hostname, address, domainKey.recordValue);
     return {
       publicHostname: hostname,
       domain,
       secureWeb: dependencies.configuration.secureWeb,
-      dns: [
-        { type: "A or AAAA", host: hostname, value: "The public address of this server" },
-        { type: "MX", host: domain, value: `10 ${hostname}` },
-        { type: "TXT", host: domain, value: "v=spf1 mx -all" }
-      ],
+      dns: dnsGuide.records,
+      zoneFile: dnsGuide.zoneFile,
       clients: {
         incomingHost: hostname,
         incomingPort: incoming?.port || dependencies.configuration.imapSecurePort,
@@ -306,20 +344,20 @@ export function createWebServer(dependencies: {
     const pathName = url.pathname;
     const organization = await dependencies.organizationRepository.read();
 
-    if (request.method === "GET" && pathName === "/api/bootstrap") {
+    if (request.method === "GET" && pathName === ApiEndpoint.Bootstrap) {
       sendJson(response, 200, {
-        productName: dependencies.configuration.productName,
+        productName: "Open Mail Server",
         needsSetup: !organization,
         configuredDomain: dependencies.configuration.configuredDomain,
         organization,
         account: context.account,
-        listeners: context.account?.role === "administrator" ? dependencies.listenerStatus : [],
-        hosting: organization && context.account ? await hostingGuide(organization.domain) : null
+        listeners: context.account?.role === AccountRole.Administrator ? dependencies.listenerStatus : [],
+        hosting: organization && context.account?.role === AccountRole.Administrator ? await hostingGuide(organization.domain) : null
       });
       return true;
     }
 
-    if (request.method === "POST" && pathName === "/api/setup") {
+    if (request.method === "POST" && pathName === ApiEndpoint.Setup) {
       if (organization || (await dependencies.accountRepository.hasAccounts())) {
         throw new HttpError(409, "This server is already set up");
       }
@@ -348,7 +386,7 @@ export function createWebServer(dependencies: {
       return true;
     }
 
-    if (request.method === "POST" && pathName === "/api/session") {
+    if (request.method === "POST" && pathName === ApiEndpoint.Session) {
       const address = normalizeAddress(context.body.address);
       const key = `sign-in:${address}`;
       const blocked = dependencies.signInGuard.rejectionMessage(key);
@@ -384,7 +422,7 @@ export function createWebServer(dependencies: {
       return true;
     }
 
-    if (request.method === "POST" && pathName === "/api/session/one-time-password") {
+    if (request.method === "POST" && pathName === ApiEndpoint.SessionOneTimePassword) {
       const address = readPendingSignIn(request);
       if (!address) {
         throw new HttpError(401, "Sign in again");
@@ -411,7 +449,7 @@ export function createWebServer(dependencies: {
       return true;
     }
 
-    if (request.method === "DELETE" && pathName === "/api/session") {
+    if (request.method === "DELETE" && pathName === ApiEndpoint.Session) {
       const cookies = readCookies(request);
       await dependencies.sessionRepository.remove(cookies.session || "");
       writeSessionCookie(response, "", connectionIsSecure(request));
@@ -419,30 +457,54 @@ export function createWebServer(dependencies: {
       return true;
     }
 
-    if (!pathName.startsWith("/api/")) {
+    if (!pathName.startsWith(`${ApiEndpoint.Root}/`)) {
       return false;
     }
 
-    if (request.method === "GET" && pathName === "/api/activity/summary") {
+    if (companyApiPath(pathName)) {
+      requireAdministrator(context);
+    }
+
+    if (request.method === "GET" && pathName === ApiEndpoint.ActivitySummary) {
       requireAdministrator(context);
       const days = await dependencies.activityLogger.dailyCounts(14);
+      const queued = await dependencies.deliveryService.queuedCount();
+      const attentionEvents = await dependencies.activityLogger.attentionEvents();
+      const publicPorts = await checkPublicPorts(
+        await dependencies.serverName(),
+        dependencies.listenerStatus.map((listener) => listener.port),
+        dependencies.configuration.host
+      );
       sendJson(response, 200, {
         organization,
         days,
-        queued: await dependencies.deliveryService.queuedCount(),
+        queued,
+        attention: attentionEvents.length + queued,
         mailboxCount: (await dependencies.accountRepository.listAccounts()).length,
         listeners: dependencies.listenerStatus,
-        hosting: organization ? await hostingGuide(organization.domain) : null,
-        publicPorts: await checkPublicPorts(
-          await dependencies.serverName(),
-          dependencies.listenerStatus.map((listener) => listener.port),
-          dependencies.configuration.host
-        )
+        hosting: organization ? await hostingGuide(organization.domain, publicPorts.address) : null,
+        publicPorts
       });
       return true;
     }
 
-    if (request.method === "GET" && pathName === "/api/activity") {
+    if (request.method === "GET" && pathName === ApiEndpoint.ActivityAttention) {
+      requireAdministrator(context);
+      sendJson(response, 200, {
+        events: await dependencies.activityLogger.attentionEvents(),
+        messages: await dependencies.deliveryService.listFailedEmail()
+      });
+      return true;
+    }
+
+    if (request.method === "POST" && pathName === ApiEndpoint.ActivityAttentionReset) {
+      requireAdministrator(context);
+      const acknowledgedAt = await dependencies.activityLogger.acknowledgeAttention();
+      sendJson(response, 200, { acknowledgedAt });
+      return true;
+    }
+
+    if (request.method === "GET" && pathName === ApiEndpoint.Activity) {
       requireAdministrator(context);
       const events = await dependencies.activityLogger.query({
         protocol: url.searchParams.get("protocol") || "",
@@ -454,13 +516,29 @@ export function createWebServer(dependencies: {
       return true;
     }
 
-    if (request.method === "GET" && pathName === "/api/mailboxes") {
+    if (request.method === "GET" && pathName === ApiEndpoint.FailedEmail) {
+      requireAdministrator(context);
+      sendJson(response, 200, { messages: await dependencies.deliveryService.listFailedEmail() });
+      return true;
+    }
+
+    if (request.method === "POST" && pathName === ApiEndpoint.FailedEmailResend) {
+      requireAdministrator(context);
+      if (!Array.isArray(context.body.identifiers)) {
+        throw new HttpError(400, "Choose the failed email to resend");
+      }
+      const identifiers = context.body.identifiers.map((value) => textValue(value).trim()).filter(Boolean);
+      sendJson(response, 200, await dependencies.deliveryService.resendFailedEmail(identifiers));
+      return true;
+    }
+
+    if (request.method === "GET" && pathName === ApiEndpoint.Mailboxes) {
       requireAdministrator(context);
       sendJson(response, 200, { mailboxes: await dependencies.accountRepository.listAccounts() });
       return true;
     }
 
-    if (request.method === "POST" && pathName === "/api/mailboxes") {
+    if (request.method === "POST" && pathName === ApiEndpoint.Mailboxes) {
       requireAdministrator(context);
       if (!organization) {
         throw new HttpError(409, "Set up the company domain first");
@@ -477,7 +555,7 @@ export function createWebServer(dependencies: {
       return true;
     }
 
-    if (request.method === "POST" && pathName === "/api/mailboxes/password") {
+    if (request.method === "POST" && pathName === ApiEndpoint.MailboxPassword) {
       const administrator = requireAdministrator(context);
       const updated = await dependencies.accountRepository.replacePassword(
         normalizeAddress(context.body.address),
@@ -500,7 +578,7 @@ export function createWebServer(dependencies: {
       return true;
     }
 
-    if (request.method === "POST" && pathName === "/api/mailboxes/access") {
+    if (request.method === "POST" && pathName === ApiEndpoint.MailboxAccess) {
       const administrator = requireAdministrator(context);
       const address = normalizeAddress(context.body.address);
       const disabled = context.body.disabled === true;
@@ -527,14 +605,14 @@ export function createWebServer(dependencies: {
       return true;
     }
 
-    if (request.method === "GET" && pathName === "/api/settings") {
+    if (request.method === "GET" && pathName === ApiEndpoint.Settings) {
       requireAdministrator(context);
       const settings = await dependencies.settingsRepository.read();
       sendJson(response, 200, { settings: dependencies.settingsRepository.present(settings) });
       return true;
     }
 
-    if (request.method === "PUT" && pathName === "/api/settings") {
+    if (request.method === "PUT" && pathName === ApiEndpoint.Settings) {
       requireAdministrator(context);
       const relay = context.body.relay;
       const relayRecord = relay && typeof relay === "object" ? (relay as Record<string, unknown>) : {};
@@ -566,15 +644,19 @@ export function createWebServer(dependencies: {
       return true;
     }
 
-    if (request.method === "GET" && pathName === "/api/certificate") {
+    if (request.method === "GET" && pathName === ApiEndpoint.Certificate) {
       requireAdministrator(context);
       sendJson(response, 200, { certificate: await dependencies.readCertificate() });
       return true;
     }
 
-    if (request.method === "POST" && pathName === "/api/certificate") {
+    if (request.method === "POST" && pathName === ApiEndpoint.Certificate) {
       requireAdministrator(context);
-      const certificate = await dependencies.replaceCertificate(textValue(context.body.certificate), textValue(context.body.privateKey));
+      const certificate = await dependencies.replaceCertificate(
+        textValue(context.body.certificate),
+        textValue(context.body.privateKey),
+        textValue(context.body.intermediateCertificates)
+      );
       await dependencies.activityLogger.record({
         protocol: MailProtocol.Web,
         action: ActivityAction.Account,
@@ -593,7 +675,35 @@ export function createWebServer(dependencies: {
 
     const account = requireAccount(context);
 
-    if (request.method === "POST" && pathName === "/api/account/password") {
+    if (request.method === "GET" && pathName === ApiEndpoint.MailboxEvents) {
+      const stopListening = dependencies.mailboxEvents.subscribe((change) => {
+        if (change.address !== account.address || response.writableEnded || response.destroyed) {
+          return;
+        }
+        response.write(`data: ${JSON.stringify({ folderName: change.folderStorageName })}\n\n`);
+      });
+      response.writeHead(200, {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive"
+      });
+      response.write(": connected\n\n");
+      const heartbeat = setInterval(() => {
+        if (response.writableEnded || response.destroyed) {
+          clearInterval(heartbeat);
+          return;
+        }
+        response.write(":\n\n");
+      }, 20000);
+      heartbeat.unref();
+      request.on("close", () => {
+        clearInterval(heartbeat);
+        stopListening();
+      });
+      return true;
+    }
+
+    if (request.method === "POST" && pathName === ApiEndpoint.AccountPassword) {
       const current = await dependencies.accountRepository.verifyCredentials(account.address, textValue(context.body.currentPassword));
       if (!current) {
         throw new HttpError(401, "Current password is wrong");
@@ -606,11 +716,11 @@ export function createWebServer(dependencies: {
       return true;
     }
 
-    if (request.method === "POST" && pathName === "/api/account/one-time-password") {
+    if (request.method === "POST" && pathName === ApiEndpoint.AccountOneTimePassword) {
       const secret = createOneTimePasswordSecret();
       await dependencies.accountRepository.storePendingOneTimePassword(account.address, secret);
       const uri = oneTimePasswordUri({
-        issuer: dependencies.configuration.productName,
+        issuer: "Open Mail Server",
         accountName: account.address,
         secret
       });
@@ -618,7 +728,7 @@ export function createWebServer(dependencies: {
       return true;
     }
 
-    if (request.method === "POST" && pathName === "/api/account/one-time-password/confirm") {
+    if (request.method === "POST" && pathName === ApiEndpoint.AccountOneTimePasswordConfirm) {
       const updated = await dependencies.accountRepository.confirmOneTimePassword(account.address, textValue(context.body.code));
       if (!updated) {
         throw new HttpError(401, "That authenticator code is wrong");
@@ -627,7 +737,7 @@ export function createWebServer(dependencies: {
       return true;
     }
 
-    if (request.method === "POST" && pathName === "/api/account/one-time-password/remove") {
+    if (request.method === "POST" && pathName === ApiEndpoint.AccountOneTimePasswordRemove) {
       const current = await dependencies.accountRepository.verifyCredentials(account.address, textValue(context.body.password));
       const matches = await dependencies.accountRepository.oneTimePasswordMatches(account.address, textValue(context.body.code));
       if (!current || !matches) {
@@ -637,9 +747,12 @@ export function createWebServer(dependencies: {
       sendJson(response, 200, { account: updated });
       return true;
     }
-    const folderMatch = /^\/api\/folders\/([^/]+)\/messages(?:\/([^/]+))?(?:\/attachments\/(\d+))?$/.exec(pathName);
+    const folderMatch =
+      matchApiEndpoint(pathName, ApiEndpoint.FolderAttachment) ||
+      matchApiEndpoint(pathName, ApiEndpoint.FolderMessage) ||
+      matchApiEndpoint(pathName, ApiEndpoint.FolderMessages);
 
-    if (request.method === "GET" && pathName === "/api/folders") {
+    if (request.method === "GET" && pathName === ApiEndpoint.Folders) {
       const folders = await dependencies.messageRepository.listFolders(account.address);
       const counts = [];
       for (const folder of folders) {
@@ -654,50 +767,61 @@ export function createWebServer(dependencies: {
       return true;
     }
 
-    if (request.method === "POST" && pathName === "/api/messages") {
-      const toAddresses = parseAddressList(context.body.to);
-      const copyAddresses = parseAddressList(context.body.copy);
-      const blindCopyAddresses = parseAddressList(context.body.blindCopy);
-      assertAddressList(toAddresses, "To");
-      for (const address of [...copyAddresses, ...blindCopyAddresses]) {
-        if (!isValidAddress(address)) {
-          throw new HttpError(400, `Invalid address: ${address}`);
+    if (request.method === "POST" && pathName === ApiEndpoint.Messages) {
+      try {
+        const toAddresses = parseAddressList(context.body.to);
+        const copyAddresses = parseAddressList(context.body.copy);
+        const blindCopyAddresses = parseAddressList(context.body.blindCopy);
+        assertAddressList(toAddresses, "To");
+        for (const address of [...copyAddresses, ...blindCopyAddresses]) {
+          if (!isValidAddress(address)) {
+            throw new HttpError(400, `Invalid address: ${address}`);
+          }
         }
+        const domain = organization?.domain || account.address.split("@")[1];
+        const rawBuffer = createRawMessage({
+          fromName: account.displayName,
+          fromAddress: account.address,
+          toAddresses,
+          copyAddresses,
+          subject: textValue(context.body.subject),
+          text: textValue(context.body.text),
+          html: sanitizeMessageHtml(textValue(context.body.html)),
+          attachments: readOutboundAttachments(context.body.attachments, dependencies.configuration.maximumMessageBytes),
+          messageIdentifierHeader: createMessageIdentifier(domain),
+          inReplyTo: textValue(context.body.inReplyTo),
+          date: new Date()
+        });
+        const result = await dependencies.deliveryService.deliver({
+          fromAddress: account.address,
+          recipientAddresses: [...toAddresses, ...copyAddresses, ...blindCopyAddresses],
+          rawBuffer,
+          authenticatedAddress: account.address,
+          remoteAddress: request.socket.remoteAddress || "",
+          protocol: MailProtocol.Web,
+          acceptExternalImmediately: true,
+          bounceMissingMailboxes: true
+        });
+        sendJson(response, 201, result);
+      } catch (error) {
+        const friendly = messageSendError(error);
+        if (!friendly) {
+          throw error;
+        }
+        throw new HttpError(friendly.statusCode, friendly.message);
       }
-      const domain = organization?.domain || account.address.split("@")[1];
-      const rawBuffer = createRawMessage({
-        fromName: account.displayName,
-        fromAddress: account.address,
-        toAddresses,
-        copyAddresses,
-        subject: textValue(context.body.subject),
-        text: textValue(context.body.text),
-        html: sanitizeMessageHtml(textValue(context.body.html)),
-        attachments: readOutboundAttachments(context.body.attachments, dependencies.configuration.maximumMessageBytes),
-        messageIdentifierHeader: createMessageIdentifier(domain),
-        inReplyTo: textValue(context.body.inReplyTo),
-        date: new Date()
-      });
-      const result = await dependencies.deliveryService.deliver({
-        fromAddress: account.address,
-        recipientAddresses: [...toAddresses, ...copyAddresses, ...blindCopyAddresses],
-        rawBuffer,
-        authenticatedAddress: account.address,
-        remoteAddress: request.socket.remoteAddress || "",
-        protocol: MailProtocol.Web
-      });
-      sendJson(response, 201, result);
       return true;
     }
 
-    if (request.method === "POST" && pathName === "/api/drafts") {
+    if (request.method === "POST" && pathName === ApiEndpoint.Drafts) {
       const domain = organization?.domain || account.address.split("@")[1];
       const toAddresses = parseAddressList(context.body.to).filter((address) => isValidAddress(address));
+      const copyAddresses = parseAddressList(context.body.copy).filter((address) => isValidAddress(address));
       const rawBuffer = createRawMessage({
         fromName: account.displayName,
         fromAddress: account.address,
         toAddresses: toAddresses.length ? toAddresses : [account.address],
-        copyAddresses: [],
+        copyAddresses,
         subject: textValue(context.body.subject) || "(no subject)",
         text: textValue(context.body.text),
         html: sanitizeMessageHtml(textValue(context.body.html)),
@@ -710,7 +834,7 @@ export function createWebServer(dependencies: {
         fromName: account.displayName,
         fromAddress: account.address,
         toAddresses,
-        copyAddresses: [] as string[],
+        copyAddresses,
         subject: textValue(context.body.subject) || "(no subject)",
         text: textValue(context.body.text),
         html: sanitizeMessageHtml(textValue(context.body.html)),
@@ -726,7 +850,7 @@ export function createWebServer(dependencies: {
         rawSize: rawBuffer.length,
         attachments: parseRawMessage(rawBuffer).attachments
       };
-      const record = await dependencies.messageRepository.appendMessage(account.address, "drafts", parsedDraft);
+      const record = await dependencies.messageRepository.appendMessage(account.address, MailFolderName.Drafts, parsedDraft);
       sendJson(response, 201, { message: summary(record) });
       return true;
     }
@@ -734,9 +858,9 @@ export function createWebServer(dependencies: {
     if (!folderMatch) {
       throw new HttpError(404, "Not found");
     }
-    const folderName = decodeURIComponent(folderMatch[1]);
-    const identifier = folderMatch[2] || "";
-    const attachmentIndex = folderMatch[3];
+    const folderName = folderMatch.folder || "";
+    const identifier = folderMatch.message || "";
+    const attachmentIndex = folderMatch.attachment;
 
     if (request.method === "GET" && !identifier) {
       const search = (url.searchParams.get("search") || "").trim().toLowerCase();
@@ -761,12 +885,7 @@ export function createWebServer(dependencies: {
         throw new HttpError(404, "Attachment not found");
       }
       const content = Buffer.from(attachment.contentEncoded || "", "base64");
-      response.writeHead(200, {
-        "Content-Type": attachment.contentType || "application/octet-stream",
-        "Content-Length": content.length,
-        "Content-Disposition": `attachment; filename="${attachment.fileName.replace(/"/g, "")}"`,
-        "X-Content-Type-Options": "nosniff"
-      });
+      response.writeHead(200, attachmentDownloadHeaders(attachment.fileName, attachment.contentType || "", content.length));
       response.end(content);
       return true;
     }
@@ -781,7 +900,7 @@ export function createWebServer(dependencies: {
         message: {
           ...summary(message),
           text: message.text || "",
-          html: message.html || "",
+          html: sanitizeMessageHtml(message.html || ""),
           messageIdentifierHeader: message.messageIdentifierHeader || "",
           attachments: (message.attachments || []).map((attachment, index) => ({
             index,
@@ -809,10 +928,10 @@ export function createWebServer(dependencies: {
     }
 
     if (request.method === "DELETE" && identifier) {
-      if (folderName.toLowerCase() === "trash") {
+      if (folderName.toLowerCase() === MailFolderName.Trash) {
         await dependencies.messageRepository.removeMessages(account.address, folderName, [identifier]);
       } else {
-        await dependencies.messageRepository.moveMessage(account.address, folderName, "trash", identifier);
+        await dependencies.messageRepository.moveMessage(account.address, folderName, MailFolderName.Trash, identifier);
       }
       sendJson(response, 200, { removed: true });
       return true;
@@ -830,16 +949,26 @@ export function createWebServer(dependencies: {
     }
     response.setHeader(
       "Content-Security-Policy",
-      "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'self'; frame-src 'self'"
+      "default-src 'self'; connect-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'self'; frame-ancestors 'none'"
     );
     try {
       const host = request.headers.host || `127.0.0.1:${dependencies.configuration.webPort}`;
       const url = new URL(request.url || "/", `http://${host}`);
       if (request.method !== "GET" && request.method !== "HEAD") {
         const origin = request.headers.origin;
+        const fetchSite = request.headers["sec-fetch-site"];
+        const site = (Array.isArray(fetchSite) ? fetchSite[0] : fetchSite || "").toLowerCase();
+        if (site === "cross-site") {
+          throw new HttpError(403, "Origin is not allowed");
+        }
         if (origin) {
-          const originHost = new URL(origin).host;
-          if (originHost !== host) {
+          let originHost = "";
+          try {
+            originHost = new URL(origin).host;
+          } catch {
+            throw new HttpError(403, "Origin is not allowed");
+          }
+          if (originHost.toLowerCase() !== host.toLowerCase()) {
             throw new HttpError(403, "Origin is not allowed");
           }
         }

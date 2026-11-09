@@ -1,3 +1,10 @@
 export const storageCipherAlgorithm = "aes-256-gcm";
-
 export const storageKeyBytes = 32;
+export const storageNonceBytes = 12;
+export const storageAuthenticationTagBytes = 16;
+export const storageFormatVersion = 2;
+export const storageKeyDerivationHash = "sha256";
+export const storageKeyDerivationSalt = "email-server";
+export const storageKeyDerivationInfo = "storage-v2";
+export const storageAssociatedDataPrefix = "email-server.storage.v2";
+export const maximumSealedBytes = 80 * 1024 * 1024;

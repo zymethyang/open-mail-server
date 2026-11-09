@@ -11,6 +11,8 @@ import type { ServerCertificate } from "../certificate/index.js";
 import type { SignInGuard } from "../signIn/interfaces/signInGuard.js";
 import { ActivityAction } from "../activity/enums/activityAction.js";
 import { ActivityResult } from "../activity/enums/activityResult.js";
+import { MailFolderName } from "../message/enums/mailFolderName.js";
+import { Pop3Command } from "./enums/pop3Command.js";
 import { MailProtocol } from "../protocol/enums/mailProtocol.js";
 import { listen } from "../protocol/utils/listen.js";
 import { createProtocolReader, dotStuff } from "../protocol/index.js";
@@ -42,7 +44,6 @@ export class Pop3Server {
     messageRepository: MessageRepository;
     signInGuard: SignInGuard;
     activityLogger: ActivityLogger;
-    productName: string;
   }) {}
 
   async start(): Promise<{ server: net.Server; port: number }> {
@@ -56,10 +57,10 @@ export class Pop3Server {
       username: "",
       messages: [] as MessageRecord[],
       deleted: new Set<string>(),
-      authenticationPlain: false
+      authenticationStep: "" as "" | "plain" | "login-username" | "login-password"
     };
     reader.attach(socket);
-    reader.send(`+OK ${input.productName} POP3 ready\r\n`);
+    reader.send(`+OK Open Mail Server POP3 ready\r\n`);
     reader.onLine = (line) => handleLine(line);
 
     function visibleMessages() {
@@ -108,30 +109,42 @@ export class Pop3Server {
       input.signInGuard.recordSuccess(key);
       session.accountAddress = account.address;
       await input.messageRepository.ensureMailbox(account.address);
-      session.messages = await input.messageRepository.listMessages(account.address, "inbox");
+      session.messages = await input.messageRepository.listMessages(account.address, MailFolderName.Inbox);
       reader.send(`+OK Signed in, ${session.messages.length} messages\r\n`);
     }
 
     async function handleLine(line: string): Promise<void> {
-      if (session.authenticationPlain) {
-        session.authenticationPlain = false;
+      if (session.authenticationStep === "plain") {
+        session.authenticationStep = "";
         const decoded = Buffer.from(line.trim(), "base64").toString("utf8").split("\u0000");
         await signIn(decoded[1] || "", decoded[2] || "");
+        return;
+      }
+      if (session.authenticationStep === "login-username") {
+        session.username = Buffer.from(line.trim(), "base64").toString("utf8");
+        session.authenticationStep = "login-password";
+        reader.send("+ UGFzc3dvcmQ6\r\n");
+        return;
+      }
+      if (session.authenticationStep === "login-password") {
+        const password = Buffer.from(line.trim(), "base64").toString("utf8");
+        session.authenticationStep = "";
+        await signIn(session.username, password);
         return;
       }
       const spaceIndex = line.indexOf(" ");
       const command = (spaceIndex === -1 ? line : line.slice(0, spaceIndex)).toUpperCase();
       const argument = spaceIndex === -1 ? "" : line.slice(spaceIndex + 1);
 
-      if (command === "CAPA") {
-        const lines = ["+OK Capability list follows", "USER", "UIDL", "TOP", "SASL PLAIN", `IMPLEMENTATION ${input.productName}`];
+      if (command === Pop3Command.Capability) {
+        const lines = ["+OK Capability list follows", Pop3Command.User, Pop3Command.UniqueIdentifierList, Pop3Command.Top, "SASL PLAIN LOGIN", "IMPLEMENTATION Open Mail Server"];
         if (!session.secure) {
-          lines.push("STLS");
+          lines.push(Pop3Command.StartTls);
         }
         reader.send(`${lines.join("\r\n")}\r\n.\r\n`);
         return;
       }
-      if (command === "STLS") {
+      if (command === Pop3Command.StartTls) {
         if (session.secure || session.accountAddress) {
           reader.send("-ERR TLS is not available now\r\n");
           return;
@@ -142,7 +155,7 @@ export class Pop3Server {
         session.secure = true;
         return;
       }
-      if (command === "USER") {
+      if (command === Pop3Command.User) {
         if (session.accountAddress) {
           reader.send("-ERR Already signed in\r\n");
           return;
@@ -151,7 +164,7 @@ export class Pop3Server {
         reader.send("+OK User accepted\r\n");
         return;
       }
-      if (command === "PASS") {
+      if (command === Pop3Command.Password) {
         if (session.accountAddress || !session.username) {
           reader.send("-ERR Send USER first\r\n");
           return;
@@ -159,28 +172,40 @@ export class Pop3Server {
         await signIn(session.username, argument);
         return;
       }
-      if (command === "AUTH") {
+      if (command === Pop3Command.Authenticate) {
         if (session.accountAddress || !session.secure) {
           reader.send("-ERR Authentication is not available\r\n");
           return;
         }
         const [mechanism, initial] = argument.split(" ");
-        if ((mechanism || "").toUpperCase() !== "PLAIN") {
-          reader.send("-ERR Mechanism is not supported\r\n");
+        const name = (mechanism || "").toUpperCase();
+        if (name === "PLAIN") {
+          if (initial) {
+            const decoded = Buffer.from(initial, "base64").toString("utf8").split("\u0000");
+            await signIn(decoded[1] || "", decoded[2] || "");
+            return;
+          }
+          session.authenticationStep = "plain";
+          reader.send("+\r\n");
           return;
         }
-        if (initial) {
-          const decoded = Buffer.from(initial, "base64").toString("utf8").split("\u0000");
-          await signIn(decoded[1] || "", decoded[2] || "");
+        if (name === "LOGIN") {
+          if (initial) {
+            session.username = Buffer.from(initial, "base64").toString("utf8");
+            session.authenticationStep = "login-password";
+            reader.send("+ UGFzc3dvcmQ6\r\n");
+            return;
+          }
+          session.authenticationStep = "login-username";
+          reader.send("+ VXNlcm5hbWU6\r\n");
           return;
         }
-        session.authenticationPlain = true;
-        reader.send("+\r\n");
+        reader.send("-ERR Mechanism is not supported\r\n");
         return;
       }
-      if (command === "QUIT") {
+      if (command === Pop3Command.Quit) {
         if (session.accountAddress && session.deleted.size) {
-          await input.messageRepository.removeMessages(session.accountAddress, "inbox", [...session.deleted]);
+          await input.messageRepository.removeMessages(session.accountAddress, MailFolderName.Inbox, [...session.deleted]);
         }
         reader.send("+OK Goodbye\r\n");
         reader.close();
@@ -190,22 +215,22 @@ export class Pop3Server {
         reader.send("-ERR Sign in required\r\n");
         return;
       }
-      if (command === "NOOP") {
+      if (command === Pop3Command.NoOperation) {
         reader.send("+OK\r\n");
         return;
       }
-      if (command === "STAT") {
+      if (command === Pop3Command.Statistics) {
         const visible = visibleMessages();
         const size = visible.reduce((total, item) => total + (item.message.rawSize || 0), 0);
         reader.send(`+OK ${visible.length} ${size}\r\n`);
         return;
       }
-      if (command === "RSET") {
+      if (command === Pop3Command.Reset) {
         session.deleted.clear();
         reader.send("+OK\r\n");
         return;
       }
-      if (command === "LIST") {
+      if (command === Pop3Command.List) {
         if (!argument) {
           const visible = visibleMessages();
           const lines = visible.map((item) => `${item.number} ${item.message.rawSize || 0}`);
@@ -220,7 +245,7 @@ export class Pop3Server {
         reader.send(`+OK ${found.number} ${found.message.rawSize || 0}\r\n`);
         return;
       }
-      if (command === "UIDL") {
+      if (command === Pop3Command.UniqueIdentifierList) {
         if (!argument) {
           const visible = visibleMessages();
           const lines = visible.map((item) => `${item.number} ${item.message.identifier}`);
@@ -235,17 +260,17 @@ export class Pop3Server {
         reader.send(`+OK ${found.number} ${found.message.identifier}\r\n`);
         return;
       }
-      if (command === "RETR" || command === "TOP") {
+      if (command === Pop3Command.Retrieve || command === Pop3Command.Top) {
         const [numberText, lineText] = argument.split(" ");
         const found = findMessage(numberText);
         if (!found) {
           reader.send("-ERR No such message\r\n");
           return;
         }
-        const record = await input.messageRepository.readMessage(session.accountAddress, "inbox", found.message.identifier);
+        const record = await input.messageRepository.readMessage(session.accountAddress, MailFolderName.Inbox, found.message.identifier);
         const rawBuffer = rawBufferFromMessage(record);
         let payload = rawBuffer;
-        if (command === "TOP") {
+        if (command === Pop3Command.Top) {
           const lineCount = Number(lineText || 0);
           const parts = splitHeaderAndBody(rawBuffer);
           payload = Buffer.concat([parts.header, Buffer.from("\r\n\r\n"), firstLines(parts.body, Number.isFinite(lineCount) ? lineCount : 0)]);
@@ -254,7 +279,7 @@ export class Pop3Server {
         reader.send(dotStuff(payload));
         return;
       }
-      if (command === "DELE") {
+      if (command === Pop3Command.Delete) {
         const found = findMessage(argument);
         if (!found) {
           reader.send("-ERR No such message\r\n");

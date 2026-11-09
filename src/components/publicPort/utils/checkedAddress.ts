@@ -37,46 +37,35 @@ export function isPublicInternetAddress(address: string): boolean {
 export function chooseCheckedAddress(input: {
   hostname: string;
   resolvedAddress: string;
-  discoveredAddress: string;
-  localAddresses: readonly string[];
+  networkAddress: string;
 }): { address: string; source: string } {
   const hostname = input.hostname.trim().toLowerCase();
-  const resolvedAddress = input.resolvedAddress.trim();
-  const discoveredAddress = isPublicInternetAddress(input.discoveredAddress.trim()) ? input.discoveredAddress.trim() : "";
-  const localAddresses = new Set(input.localAddresses.map((address) => address.trim().toLowerCase()));
+  const resolvedAddress = isPublicInternetAddress(input.resolvedAddress.trim()) ? input.resolvedAddress.trim() : "";
+  const networkAddress = isPublicInternetAddress(input.networkAddress.trim()) ? input.networkAddress.trim() : "";
   const localName = !hostname || hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".test");
 
   if (isLiteralAddress(hostname)) {
     return { address: hostname, source: "configured address" };
   }
-  if (resolvedAddress && isPublicInternetAddress(resolvedAddress) && (resolvedAddress === discoveredAddress || localAddresses.has(resolvedAddress))) {
-    return { address: resolvedAddress, source: `address record for ${hostname}` };
+  if (networkAddress && resolvedAddress === networkAddress) {
+    return { address: networkAddress, source: `address record for ${hostname}` };
   }
-  if (discoveredAddress) {
-    if (!localName && resolvedAddress && localAddresses.has(resolvedAddress)) {
-      return {
-        address: discoveredAddress,
-        source: `${hostname} points at ${resolvedAddress} on this machine. This is the public address seen from the internet`
-      };
-    }
-    if (!localName && resolvedAddress && resolvedAddress !== discoveredAddress) {
-      return {
-        address: discoveredAddress,
-        source: `${hostname} points at ${resolvedAddress}, which is not this server. This is the public address seen from the internet`
-      };
-    }
-    return { address: discoveredAddress, source: "public address seen from the internet" };
+  if (networkAddress && resolvedAddress && resolvedAddress !== networkAddress) {
+    return {
+      address: networkAddress,
+      source: `${hostname} points at ${resolvedAddress}. The public address on this machine's network card is ${networkAddress}`
+    };
   }
-  if (!localName && resolvedAddress) {
-    return { address: resolvedAddress, source: `address record for ${hostname}` };
+  if (networkAddress) {
+    return { address: networkAddress, source: "public address on a network card" };
   }
   if (localName) {
     return {
       address: "",
-      source: `${hostname || "This name"} is not a public hostname, and the public address lookup did not answer.`
+      source: `${hostname || "This name"} is not a public hostname, and no network card has a public address.`
     };
   }
-  return { address: "", source: "The public address lookup did not return an address." };
+  return { address: "", source: "No network card on this server has a public address." };
 }
 
 function isDottedAddress(address: string): boolean {

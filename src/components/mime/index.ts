@@ -11,6 +11,7 @@ export {
   formatRfc5322Date,
   imapAddressGroup,
   parseRawMessage,
+  senderMailboxAddresses,
   quoteImap,
   rawBufferFromMessage,
   sanitizeMessageHtml,

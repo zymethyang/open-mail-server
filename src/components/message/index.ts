@@ -58,6 +58,21 @@ function createMessageRepository(storageDirectory: string, events: MailboxEvents
       state.subscriptions = state.subscriptions || permanentFolders.map((folder) => folder.storageName);
       await writeJson(statePath(address), state);
     }
+    state.subscriptions = Array.isArray(state.subscriptions) ? state.subscriptions : [];
+    let addedPermanentFolder = false;
+    for (const folder of permanentFolders) {
+      if (state.folders.some((item) => item.storageName === folder.storageName)) {
+        continue;
+      }
+      state.folders.push({ ...folder });
+      if (!state.subscriptions.includes(folder.storageName)) {
+        state.subscriptions.push(folder.storageName);
+      }
+      addedPermanentFolder = true;
+    }
+    if (addedPermanentFolder) {
+      await writeJson(statePath(address), state);
+    }
     for (const folder of state.folders) {
       if (isSafeStorageName(folder.storageName)) {
         await mkdir(folderDirectory(address, folder.storageName), { recursive: true });
@@ -167,7 +182,7 @@ function createMessageRepository(storageDirectory: string, events: MailboxEvents
     },
 
     async updateMessage(address, folderName, identifier, changes) {
-      return withLock(lockName(address), async () => {
+      const next = await withLock(lockName(address), async () => {
         const state = await readState(address);
         const folder = requireFolder(state, folderName);
         if (!/^[a-f0-9]{24}$/.test(identifier)) {
@@ -183,7 +198,7 @@ function createMessageRepository(storageDirectory: string, events: MailboxEvents
           }
           throw error;
         }
-        const next: MessageRecord = {
+        const updated: MessageRecord = {
           ...current,
           ...changes,
           identifier: current.identifier,
@@ -192,9 +207,11 @@ function createMessageRepository(storageDirectory: string, events: MailboxEvents
           rawEncoded: current.rawEncoded,
           rawSize: current.rawSize
         };
-        await writeRecord(address, folder.storageName, next);
-        return next;
+        await writeRecord(address, folder.storageName, updated);
+        return updated;
       });
+      events.publish({ address: normalizeAddress(address), folderStorageName: next.folderName });
+      return next;
     },
 
     async removeMessages(address, folderName, identifiers) {
@@ -241,10 +258,13 @@ function createMessageRepository(storageDirectory: string, events: MailboxEvents
         };
         await writeRecord(address, toFolder.storageName, next);
         await rm(sourcePath, { force: true });
-        return next;
+        return { message: next, sourceFolderName: fromFolder.storageName };
       });
-      events.publish({ address: normalizeAddress(address), folderStorageName: moved.folderName });
-      return moved;
+      events.publish({ address: normalizeAddress(address), folderStorageName: moved.sourceFolderName });
+      if (moved.sourceFolderName !== moved.message.folderName) {
+        events.publish({ address: normalizeAddress(address), folderStorageName: moved.message.folderName });
+      }
+      return moved.message;
     },
 
     async createFolder(address, displayName) {

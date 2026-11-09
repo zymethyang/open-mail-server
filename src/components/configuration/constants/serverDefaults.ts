@@ -1,13 +1,4 @@
 export const defaultBindHost = "0.0.0.0";
 export const defaultStorageDirectoryName = "data";
-export const defaultWebPort = 3000;
-export const defaultSmtpPort = 25;
-export const defaultSmtpSecurePort = 465;
-export const defaultSmtpSubmissionPort = 587;
-export const defaultImapPort = 143;
-export const defaultImapSecurePort = 993;
-export const defaultPop3Port = 110;
-export const defaultPop3SecurePort = 995;
 export const defaultMaximumMessageBytes = 25 * 1024 * 1024;
-export const productName = "Email Server";
-export const defaultSecureWeb = false;
+export const defaultSecureWeb = true;

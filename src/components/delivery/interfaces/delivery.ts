@@ -12,6 +12,8 @@ export interface DeliveryRequest {
   authenticatedAddress: string;
   remoteAddress: string;
   protocol: MailProtocol;
+  acceptExternalImmediately?: boolean;
+  bounceMissingMailboxes?: boolean;
 }
 
 export interface DeliveryResult {
@@ -21,10 +23,28 @@ export interface DeliveryResult {
   warning: string;
 }
 
+export interface FailedEmail {
+  identifier: string;
+  senderAddress: string;
+  recipientAddresses: string[];
+  subject: string;
+  attempts: number;
+  nextAttemptAt: string;
+  lastError: string;
+}
+
+export interface FailedEmailResendResult {
+  sent: string[];
+  givenUp: string[];
+  stillWaiting: FailedEmail[];
+}
+
 export interface DeliveryService {
   deliver(request: DeliveryRequest): Promise<DeliveryResult>;
   processQueue(): Promise<void>;
   queuedCount(): Promise<number>;
+  listFailedEmail(): Promise<FailedEmail[]>;
+  resendFailedEmail(identifiers: string[]): Promise<FailedEmailResendResult>;
 }
 
 export interface DeliveryDependencies {
@@ -36,4 +56,5 @@ export interface DeliveryDependencies {
   serverDomain: () => Promise<string>;
   announceName: () => Promise<string>;
   readRelay: () => Promise<MailRelaySettings>;
+  signOutgoingMessage?: (rawMessage: Buffer) => Promise<Buffer>;
 }

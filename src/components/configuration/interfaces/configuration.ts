@@ -10,7 +10,6 @@ export interface Configuration {
   pop3Port: number;
   pop3SecurePort: number;
   maximumMessageBytes: number;
-  productName: string;
   configuredDomain: string;
   publicHostname: string;
   secureWeb: boolean;

@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
 import { loadConfiguration } from "./components/configuration/index.js";
+import { ApiEndpoint } from "./components/web/enums/apiEndpoint.js";
 import { startEmailServer } from "./components/emailServer/index.js";
 import { parseRawMessage } from "./components/mime/index.js";
 
@@ -21,7 +22,8 @@ const configuration = {
   imapSecurePort: 0,
   pop3Port: 0,
   pop3SecurePort: 0,
-  configuredDomain: "acme.test"
+  configuredDomain: "acme.test",
+  secureWeb: false
 };
 
 let sinkPort = 0;
@@ -136,7 +138,7 @@ async function readResponse(socket: net.Socket, options?: { tag?: string; dotTer
 }
 
 try {
-  const setup = await fetch(`http://127.0.0.1:${webPort}/api/setup`, {
+  const setup = await fetch(`http://127.0.0.1:${webPort}${ApiEndpoint.Setup}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -150,10 +152,10 @@ try {
   check(setup.status === 201, `setup status ${setup.status}`);
   const home = await fetch(`http://127.0.0.1:${webPort}/`);
   const html = await home.text();
-  check(html.includes("Email Server"), "home page name");
-  check(html.includes("styles.css"), "home page loads the design stylesheet");
+  check(html.includes("Open Mail Server"), "home page name");
+  check(html.includes("styles/base.css"), "home page loads the design stylesheet");
 
-  const stylesheet = await fetch(`http://127.0.0.1:${webPort}/styles.css`);
+  const stylesheet = await fetch(`http://127.0.0.1:${webPort}/styles/base.css`);
   const css = await stylesheet.text();
   check(css.includes("--color-primary: #2563eb"), "primary color token");
 
@@ -249,7 +251,7 @@ try {
   pop.end();
 
   const sessionCookie = (setup.headers.get("set-cookie") || "").split(";")[0];
-  const logs = await fetch(`http://127.0.0.1:${webPort}/api/activity?search=Protocol`, {
+  const logs = await fetch(`http://127.0.0.1:${webPort}${ApiEndpoint.Activity}?search=Protocol`, {
     headers: { Cookie: sessionCookie }
   });
   const logPayload = (await logs.json()) as { events?: Array<{ subject: string }> };
@@ -267,4 +269,4 @@ if (failures.length) {
   console.error(failures.join("\n"));
   process.exit(1);
 }
-console.log("Email Server protocol and console checks passed.");
+console.log("Open Mail Server protocol and console checks passed.");

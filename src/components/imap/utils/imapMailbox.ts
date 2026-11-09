@@ -466,6 +466,20 @@ export function fetchItems(message: MessageRecord, attribute: string): FetchItem
   return items;
 }
 
+export function listRequest(tokens: ImapToken[]): { pattern: string; specialUseOnly: boolean } {
+  let index = 2;
+  let specialUseOnly = false;
+  const selection = tokens[index];
+  if (Array.isArray(selection)) {
+    specialUseOnly = selection.some((item) => String(item).toUpperCase() === "SPECIAL-USE");
+    index += 1;
+  }
+  const reference = String(tokens[index] ?? "");
+  const mailbox = String(tokens[index + 1] ?? "");
+  const pattern = reference ? `${reference}${mailbox || "*"}` : mailbox || "*";
+  return { pattern, specialUseOnly };
+}
+
 export function matchesPattern(name: string, pattern: string): boolean {
   if (!pattern || pattern === "*" || pattern === "%" || pattern === '""') {
     return true;

@@ -46,12 +46,27 @@ function formatAddressHeader(name: string, address: string): string {
   return `${safeName} <${safeAddress}>`;
 }
 
+function safeMessageLocation(location: string): boolean {
+  const target = location.trim();
+  if (/^(https?:|mailto:)/i.test(target) || /^data:image\/(png|jpeg|jpg|gif|webp)(;|,)/i.test(target)) {
+    return true;
+  }
+  if (!/^cid:/i.test(target) || /javascript:|vbscript:|data:/i.test(target)) {
+    return false;
+  }
+  return /^cid:[^\s"'<>]+$/i.test(target);
+}
+
 export function sanitizeMessageHtml(value: string): string {
-  return value
-    .replace(/<script[\s\S]*?<\/script>/gi, "")
-    .replace(/<iframe[\s\S]*?<\/iframe>/gi, "")
-    .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
-    .replace(/javascript:/gi, "");
+  const withoutActiveContent = value
+    .replace(/<\s*(script|iframe|object|embed|base|meta|link|form|svg|math)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, "")
+    .replace(/<\s*(script|iframe|object|embed|base|meta|link|form|svg|math)\b[^>]*\/?\s*>/gi, "");
+  return withoutActiveContent
+    .replace(/\s+on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+    .replace(/(\s(?:href|src)\s*=\s*)(["'])([\s\S]*?)\2/gi, (_match, prefix: string, quote: string, location: string) => {
+      return safeMessageLocation(location) ? `${prefix}${quote}${location.trim()}${quote}` : `${prefix}${quote}${quote}`;
+    })
+    .replace(/javascript:|vbscript:|data:text\/html/gi, "");
 }
 
 export function createRawMessage(input: {
@@ -214,8 +229,18 @@ function parseHeaders(headerText: string): HeaderMap {
 }
 
 function headerParameter(value: string, name: string): string {
-  const pattern = new RegExp(`${name}\\s*=\\s*(?:"([^"]*)"|([^;\\s]+))`, "i");
-  const match = pattern.exec(value);
+  const encodedName = new RegExp(`${name}\\*\\s*=\\s*(?:[^']*)'[^']*'([^;]+)`, "i");
+  const encodedMatch = encodedName.exec(value);
+  if (encodedMatch?.[1]) {
+    const encoded = encodedMatch[1].trim().replace(/"/g, "");
+    try {
+      return decodeURIComponent(encoded);
+    } catch {
+      return encoded;
+    }
+  }
+  const pattern = new RegExp(`(?:^|;)\\s*${name}\\s*=\\s*(?:"([^"]*)"|([^;\\s]+))`, "i");
+  const match = pattern.exec(`;${value}`);
   return (match?.[1] || match?.[2] || "").trim();
 }
 
@@ -375,6 +400,22 @@ function collectParts(part: MimePart, textParts: string[], htmlParts: string[], 
     contentEncoded: part.body.toString("base64"),
     contentIdentifier
   });
+}
+
+function mailboxAddressesInHeader(value: string | undefined): string[] | null {
+  if (!value) {
+    return null;
+  }
+  const pattern = /[a-z0-9._%+-]+@(?:[a-z0-9-]+\.)*[a-z0-9-]+/gi;
+  return [...value.matchAll(pattern)].map((match) => normalizeAddress(match[0])).filter((address) => isValidAddress(address));
+}
+
+export function senderMailboxAddresses(rawBuffer: Buffer): { from: string[] | null; sender: string[] | null } {
+  const headers = parseMime(rawBuffer).headers;
+  return {
+    from: mailboxAddressesInHeader(headers.from),
+    sender: mailboxAddressesInHeader(headers.sender)
+  };
 }
 
 export function parseRawMessage(rawBuffer: Buffer): ParsedMessage {

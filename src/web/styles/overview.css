@@ -1,0 +1,53 @@
+.metric-grid, .split { display: grid; gap: var(--space-3); }
+.metric-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: var(--space-4); }
+.metric { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-height: 112px; }
+.metric strong { font-size: 28px; line-height: 1.2; font-variant-numeric: tabular-nums; }
+a.metric-link { color: inherit; text-decoration: none; cursor: pointer; }
+a.metric-link:hover { border-color: var(--color-primary); }
+.metric-action { color: var(--color-primary); font-weight: 650; }
+.mail-chart { position: relative; }
+.mail-chart-legend { display: flex; gap: var(--space-4); margin-bottom: var(--space-3); }
+.mail-chart-legend span { display: inline-flex; align-items: center; gap: 8px; }
+.mail-chart-legend i,
+.mail-chart-tooltip-row i {
+  display: inline-block;
+  width: 18px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--color-chart-incoming);
+}
+.mail-chart-legend .outgoing i,
+.mail-chart-tooltip-row i.outgoing {
+  background: var(--color-chart-outgoing);
+}
+.mail-chart-plot { position: relative; border-radius: var(--radius); }
+.mail-chart-svg { width: 100%; height: auto; display: block; }
+.mail-chart-grid { stroke: var(--color-border); stroke-width: 1; }
+.mail-chart-axis { fill: var(--color-muted-foreground); font-size: 12px; font-family: var(--font-family); }
+.mail-chart-incoming-area { fill: rgba(37, 99, 235, 0.14); }
+.mail-chart-outgoing-area { fill: rgba(15, 118, 110, 0.12); }
+.mail-chart-incoming-line,
+.mail-chart-outgoing-line { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.mail-chart-incoming-line { stroke: var(--color-chart-incoming); }
+.mail-chart-outgoing-line { stroke: var(--color-chart-outgoing); stroke-dasharray: 7 5; }
+.mail-chart-point { stroke-width: 2; fill: var(--color-background); }
+.mail-chart-point.incoming { stroke: var(--color-chart-incoming); }
+.mail-chart-point.outgoing { stroke: var(--color-chart-outgoing); }
+.mail-chart-cursor { stroke: var(--color-muted-foreground); stroke-width: 1; stroke-dasharray: 3 3; }
+.mail-chart-hit { fill: transparent; cursor: crosshair; }
+.mail-chart-tooltip {
+  position: absolute;
+  z-index: 2;
+  min-width: 188px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-background);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+  pointer-events: none;
+}
+.mail-chart-tooltip p { margin: 0; }
+.mail-chart-tooltip-date { font-weight: 650; margin-bottom: 8px; }
+.mail-chart-tooltip-row { display: flex; align-items: center; gap: 8px; line-height: 1.6; }
+.mail-chart-tooltip-row span { flex: 1; color: var(--color-muted-foreground); }
+.mail-chart-tooltip-row strong { font-variant-numeric: tabular-nums; }

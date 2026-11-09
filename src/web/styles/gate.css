@@ -1,0 +1,9 @@
+.gate {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(280px, 420px);
+  gap: var(--space-6);
+  align-items: start;
+  min-height: 100vh;
+  padding: 72px var(--space-6) var(--space-6);
+}
+.gate-copy { max-width: 560px; }

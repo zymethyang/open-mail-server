@@ -1,16 +1,6 @@
 import path from "node:path";
-import {
-  defaultBindHost,
-  defaultImapPort,
-  defaultImapSecurePort,
-  defaultPop3Port,
-  defaultPop3SecurePort,
-  defaultSecureWeb,
-  defaultSmtpPort,
-  defaultSmtpSecurePort,
-  defaultSmtpSubmissionPort,
-  defaultWebPort
-} from "../configuration/constants/serverDefaults.js";
+import { defaultBindHost, defaultSecureWeb } from "../configuration/constants/serverDefaults.js";
+import { ServerPort } from "../configuration/enums/serverPort.js";
 import { RelaySecurity } from "./enums/relaySecurity.js";
 import type { ListenerSettings, ServerSettings, SettingsRepository as SettingsRepositoryContract } from "./interfaces/settings.js";
 import { readJson, writeJson } from "../jsonFile/index.js";
@@ -19,14 +9,14 @@ import { withLock } from "../jsonFile/index.js";
 function defaultListeners(): ListenerSettings {
   return {
     host: defaultBindHost,
-    webPort: defaultWebPort,
-    smtpPort: defaultSmtpPort,
-    smtpSecurePort: defaultSmtpSecurePort,
-    smtpSubmissionPort: defaultSmtpSubmissionPort,
-    imapPort: defaultImapPort,
-    imapSecurePort: defaultImapSecurePort,
-    pop3Port: defaultPop3Port,
-    pop3SecurePort: defaultPop3SecurePort,
+    webPort: ServerPort.Web,
+    smtpPort: ServerPort.Smtp,
+    smtpSecurePort: ServerPort.SmtpSecure,
+    smtpSubmissionPort: ServerPort.SmtpSubmission,
+    imapPort: ServerPort.Imap,
+    imapSecurePort: ServerPort.ImapSecure,
+    pop3Port: ServerPort.Pop3,
+    pop3SecurePort: ServerPort.Pop3Secure,
     secureWeb: defaultSecureWeb
   };
 }
@@ -37,7 +27,7 @@ function emptySettings(): ServerSettings {
     relay: {
       enabled: false,
       host: "",
-      port: 587,
+      port: ServerPort.SmtpSubmission,
       username: "",
       password: "",
       security: RelaySecurity.StartTls
@@ -64,24 +54,26 @@ function assertHostname(value: string, label: string): string {
   return hostname;
 }
 
-function fixedListeners(secureWeb: boolean): ListenerSettings {
-  return {
-    ...defaultListeners(),
-    secureWeb
-  };
+function fixedListeners(): ListenerSettings {
+  return defaultListeners();
 }
 
-function assertSecurity(value: string): RelaySecurity {
-  if (value === RelaySecurity.Tls) {
-    return RelaySecurity.Tls;
+function matchingSecureRelay(port: number, security: string): { port: number; security: RelaySecurity } | null {
+  if (port === ServerPort.SmtpSubmission && security === RelaySecurity.StartTls) {
+    return { port: ServerPort.SmtpSubmission, security: RelaySecurity.StartTls };
   }
-  if (value === RelaySecurity.Plain) {
-    return RelaySecurity.Plain;
+  if (port === ServerPort.SmtpSecure && security === RelaySecurity.Tls) {
+    return { port: ServerPort.SmtpSecure, security: RelaySecurity.Tls };
   }
-  if (value === RelaySecurity.StartTls) {
-    return RelaySecurity.StartTls;
+  return null;
+}
+
+function requireSecureRelay(port: number, security: string): { port: number; security: RelaySecurity } {
+  const relay = matchingSecureRelay(port, security);
+  if (!relay) {
+    throw Object.assign(new Error(`Use port ${ServerPort.SmtpSubmission} with STARTTLS or port ${ServerPort.SmtpSecure} with TLS`), { statusCode: 400 });
   }
-  throw Object.assign(new Error("Relay security must be STARTTLS, TLS, or plain"), { statusCode: 400 });
+  return relay;
 }
 
 function createSettingsRepository(storageDirectory: string): SettingsRepositoryContract {
@@ -92,18 +84,21 @@ function createSettingsRepository(storageDirectory: string): SettingsRepositoryC
       const stored = await readJson<Partial<ServerSettings>>(filePath);
       const relay = stored.relay || emptySettings().relay;
       const listenersSaved = stored.listenersSaved === true;
-      const secureWeb = listenersSaved && stored.listeners?.secureWeb === true;
+      const secureRelay = matchingSecureRelay(Number(relay.port), String(relay.security || "")) || {
+        port: ServerPort.SmtpSubmission,
+        security: RelaySecurity.StartTls
+      };
       return {
         publicHostname: cleanHostname(stored.publicHostname || ""),
         relay: {
           enabled: Boolean(relay.enabled),
           host: cleanHostname(relay.host || ""),
-          port: Number.isInteger(relay.port) ? relay.port : 587,
+          port: secureRelay.port,
           username: String(relay.username || ""),
           password: String(relay.password || ""),
-          security: relay.security === RelaySecurity.Tls || relay.security === RelaySecurity.Plain ? relay.security : RelaySecurity.StartTls
+          security: secureRelay.security
         },
-        listeners: fixedListeners(secureWeb),
+        listeners: fixedListeners(),
         listenersSaved
       };
     } catch (error) {
@@ -137,29 +132,24 @@ function createSettingsRepository(storageDirectory: string): SettingsRepositoryC
     async update(input) {
       const publicHostname = assertHostname(input.publicHostname, "Public hostname");
       const host = assertHostname(input.relay.host, "Relay host");
-      const port = Number(input.relay.port);
-      if (!Number.isInteger(port) || port < 1 || port > 65535) {
-        throw Object.assign(new Error("Relay port must be from 1 to 65535"), { statusCode: 400 });
-      }
-      const security = assertSecurity(input.relay.security);
+      const relayConnection = requireSecureRelay(Number(input.relay.port), input.relay.security);
       if (input.relay.enabled && !host) {
         throw Object.assign(new Error("Enter the relay host"), { statusCode: 400 });
       }
       return withLock("settings", async () => {
         const current = await readUnlocked();
         const password = input.relay.password ? input.relay.password : current.relay.password;
-        const secureWeb = input.secureWeb === undefined ? current.listeners.secureWeb : input.secureWeb === true;
         const next: ServerSettings = {
           publicHostname,
           relay: {
             enabled: input.relay.enabled,
             host,
-            port,
+            port: relayConnection.port,
             username: input.relay.username.trim(),
             password,
-            security
+            security: relayConnection.security
           },
-          listeners: fixedListeners(secureWeb),
+          listeners: fixedListeners(),
           listenersSaved: input.secureWeb === undefined ? current.listenersSaved : true
         };
         await writeJson(filePath, next);

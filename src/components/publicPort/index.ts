@@ -1,17 +1,16 @@
-import { Resolver } from "node:dns";
+import dgram from "node:dgram";
 import { promises as dns } from "node:dns";
-import https from "node:https";
 import net from "node:net";
 import os from "node:os";
 import { PortReachabilityResult } from "./enums/portReachabilityResult.js";
 import type { PortReachability, PublicReachability } from "./interfaces/publicReachability.js";
 import { chooseCheckedAddress, isLiteralAddress, isPublicInternetAddress } from "./utils/checkedAddress.js";
+import { lanAddressFromRoute } from "./utils/lanAddress.js";
 
 export type { PortReachability, PublicReachability };
 
 const cache = new Map<string, { expiresAt: number; value: PublicReachability }>();
-const lookupLimitMilliseconds = 3000;
-const publicAddressServices = ["https://checkip.amazonaws.com/", "https://api.ipify.org/"];
+const lookupLimitMilliseconds = 8000;
 
 export async function checkPublicPorts(hostname: string, ports: number[], listenHost = ""): Promise<PublicReachability> {
   const uniquePorts = [...new Set(ports.filter((port) => port > 0 && port <= 65535))].sort((left, right) => left - right);
@@ -49,89 +48,81 @@ function listensOnlyOnLoopback(listenHost: string): boolean {
   return normalized === "127.0.0.1" || normalized === "::1" || normalized === "localhost" || normalized === "::ffff:127.0.0.1";
 }
 
-async function locatePublicAddress(hostname: string): Promise<{ address: string; source: string }> {
+export async function addressForDnsRecords(discoveredAddress: string): Promise<string> {
+  const discovered = discoveredAddress.trim();
+  if (isPublicInternetAddress(discovered)) {
+    return discovered;
+  }
+  return lanAddressFromRoute(await routedLocalAddress());
+}
+
+function routedLocalAddress(): Promise<string> {
+  return new Promise((resolve) => {
+    const socket = dgram.createSocket({ type: "udp4" });
+    let settled = false;
+    const finish = (address: string) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      socket.close();
+      resolve(address);
+    };
+    socket.once("error", () => finish(""));
+    socket.connect(9, "192.0.2.1", () => {
+      const address = socket.address();
+      finish(typeof address === "string" ? "" : address.address);
+    });
+  });
+}
+
+export function publicAddressFromNetworkCards(interfaces: NodeJS.Dict<os.NetworkInterfaceInfo[]> = os.networkInterfaces()): string {
+  const addresses: string[] = [];
+  for (const entries of Object.values(interfaces)) {
+    for (const entry of entries || []) {
+      const family = String(entry.family);
+      if ((family !== "IPv4" && family !== "4") || entry.internal || !isPublicInternetAddress(entry.address)) {
+        continue;
+      }
+      addresses.push(entry.address);
+    }
+  }
+  addresses.sort();
+  return addresses[0] || "";
+}
+
+export async function locatePublicAddress(hostname: string): Promise<{ address: string; source: string }> {
   const normalized = hostname.trim().toLowerCase();
   if (isLiteralAddress(normalized)) {
     return { address: normalized, source: "configured address" };
   }
   const localName = !normalized || normalized === "localhost" || normalized.endsWith(".localhost") || normalized.endsWith(".test");
-  const [resolvedAddress, discoveredAddress] = await Promise.all([
-    localName ? Promise.resolve("") : resolveAddress(normalized),
-    discoverPublicAddress()
-  ]);
+  const networkAddress = publicAddressFromNetworkCards();
+  const resolvedAddress = localName ? "" : await resolveAddress(normalized);
   return chooseCheckedAddress({
     hostname: normalized,
     resolvedAddress,
-    discoveredAddress,
-    localAddresses: machineAddresses()
+    networkAddress
   });
 }
 
 async function resolveAddress(hostname: string): Promise<string> {
-  try {
-    const addresses = await dns.resolve4(hostname);
-    return addresses.find((address) => isPublicInternetAddress(address)) || addresses[0] || "";
-  } catch {
-    return "";
-  }
-}
-
-async function discoverPublicAddress(): Promise<string> {
-  const [firstService, secondService, googleAddress] = await Promise.all([
-    readRemoteText(publicAddressServices[0]),
-    readRemoteText(publicAddressServices[1]),
-    readGooglePublicAddress()
-  ]);
-  const firstAddress = internetAddressFromText(firstService);
-  const secondAddress = internetAddressFromText(secondService);
-  if (firstAddress && (!secondAddress || firstAddress === secondAddress)) {
-    return firstAddress;
-  }
-  if (secondAddress) {
-    return secondAddress;
-  }
-  return internetAddressFromText(googleAddress);
-}
-
-function internetAddressFromText(value: string): string {
-  const match = value.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/);
-  return match && isPublicInternetAddress(match[0]) ? match[0] : "";
-}
-
-function readRemoteText(url: string): Promise<string> {
-  return withTimeout(
-    new Promise((resolve) => {
-      const request = https.get(url, { family: 4, timeout: lookupLimitMilliseconds, headers: { "User-Agent": "Email Server" } }, (response) => {
-        if (response.statusCode !== 200) {
-          response.resume();
-          resolve("");
-          return;
-        }
-        const chunks: Buffer[] = [];
-        response.on("data", (chunk: Buffer) => chunks.push(chunk));
-        response.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-        response.on("error", () => resolve(""));
-      });
-      request.on("error", () => resolve(""));
-      request.on("timeout", () => {
-        request.destroy();
-        resolve("");
-      });
-    }),
+  const fromRecord = await withTimeout(
+    dns.resolve4(hostname).then(
+      (addresses) => addresses.find((address) => isPublicInternetAddress(address)) || "",
+      () => ""
+    ),
     lookupLimitMilliseconds,
     ""
   );
-}
-
-function readGooglePublicAddress(): Promise<string> {
-  const resolver = new Resolver();
-  resolver.setServers(["8.8.8.8"]);
+  if (fromRecord) {
+    return fromRecord;
+  }
   return withTimeout(
-    new Promise((resolve) => {
-      resolver.resolveTxt("o-o.myaddr.l.google.com", (error, records) => {
-        resolve(error ? "" : records.flat().join(""));
-      });
-    }),
+    dns.lookup(hostname, { family: 4 }).then(
+      (result) => (isPublicInternetAddress(result.address) ? result.address : ""),
+      () => ""
+    ),
     lookupLimitMilliseconds,
     ""
   );
@@ -151,18 +142,6 @@ function withTimeout<T>(work: Promise<T>, milliseconds: number, fallback: T): Pr
       }
     );
   });
-}
-
-function machineAddresses(): string[] {
-  const addresses: string[] = [];
-  for (const entries of Object.values(os.networkInterfaces())) {
-    for (const entry of entries || []) {
-      if (entry.address) {
-        addresses.push(entry.address);
-      }
-    }
-  }
-  return addresses;
 }
 
 function probePort(address: string, port: number): Promise<PortReachability> {

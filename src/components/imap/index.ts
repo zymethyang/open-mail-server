@@ -15,6 +15,7 @@ import type { SignInGuard } from "../signIn/interfaces/signInGuard.js";
 import { ActivityAction } from "../activity/enums/activityAction.js";
 import { ActivityResult } from "../activity/enums/activityResult.js";
 import { MailProtocol } from "../protocol/enums/mailProtocol.js";
+import { ImapCommand } from "./enums/imapCommand.js";
 import { listen } from "../protocol/utils/listen.js";
 import { createProtocolReader } from "../protocol/index.js";
 import { secureOptions, upgradeToTls } from "../protocol/utils/transportSecurity.js";
@@ -24,6 +25,7 @@ import {
   expandAttributes,
   fetchItems,
   flagList,
+  listRequest,
   matchesPattern,
   parseStoreMode,
   selectedMessages,
@@ -36,7 +38,7 @@ import {
 function capabilityText(secure: boolean): string {
   const parts = ["IMAP4rev1", "LITERAL+", "IDLE", "MOVE", "NAMESPACE", "UNSELECT", "SPECIAL-USE", "ID", "AUTH=PLAIN", "LOGIN"];
   if (!secure) {
-    parts.push("STARTTLS");
+    parts.push(ImapCommand.StartTls);
   }
   return parts.join(" ");
 }
@@ -58,7 +60,6 @@ export class ImapServer {
     signInGuard: SignInGuard;
     activityLogger: ActivityLogger;
     mailboxEvents: MailboxEvents;
-    productName: string;
   }) {}
 
   async start(): Promise<{ server: net.Server; port: number }> {
@@ -102,13 +103,13 @@ export class ImapServer {
       session.stopIdleNotifications();
     };
     reader.attach(socket);
-    reader.send(`* OK [CAPABILITY ${capabilityText(session.secure)}] ${input.productName} ready\r\n`);
+    reader.send(`* OK [CAPABILITY ${capabilityText(session.secure)}] Open Mail Server ready\r\n`);
 
     function finishIdle(line: string): void {
       session.idle = false;
       session.stopIdleNotifications();
       session.stopIdleNotifications = () => undefined;
-      if (line.trim().toUpperCase() === "DONE") {
+      if (line.trim().toUpperCase() === ImapCommand.Done) {
         reader.send(`${session.idleTag} OK IDLE completed\r\n`);
         return;
       }
@@ -334,7 +335,7 @@ export class ImapServer {
       if (!requireAccount(tag) || !session.account) {
         return;
       }
-      if (String(tokens[1] || "").toUpperCase() !== "APPEND") {
+      if (String(tokens[1] || "").toUpperCase() !== ImapCommand.Append) {
         reader.send(`${tag} BAD Literal is not supported here\r\n`);
         return;
       }
@@ -372,44 +373,44 @@ export class ImapServer {
       let command = String(tokens[1] || "").toUpperCase();
       let argumentStart = 2;
       let useUniqueIdentifier = false;
-      if (command === "UID") {
+      if (command === ImapCommand.UniqueIdentifier) {
         useUniqueIdentifier = true;
         command = String(tokens[2] || "").toUpperCase();
         argumentStart = 3;
       }
 
       try {
-        if (command === "CAPABILITY") {
+        if (command === ImapCommand.Capability) {
           reader.send(`* CAPABILITY ${capabilityText(session.secure)}\r\n`);
           reader.send(`${tag} OK CAPABILITY completed\r\n`);
           return;
         }
-        if (command === "NOOP" || command === "CHECK") {
+        if (command === ImapCommand.NoOperation || command === ImapCommand.Check) {
           if (session.selected) {
             await announceCount();
           }
           reader.send(`${tag} OK ${command} completed\r\n`);
           return;
         }
-        if (command === "LOGOUT") {
-          reader.send(`* BYE ${input.productName} closing\r\n`);
+        if (command === ImapCommand.Logout) {
+          reader.send(`* BYE Open Mail Server closing\r\n`);
           reader.send(`${tag} OK LOGOUT completed\r\n`);
           reader.close();
           return;
         }
-        if (command === "ID") {
-          reader.send(`* ID ("name" "${input.productName}")\r\n`);
+        if (command === ImapCommand.Identify) {
+          reader.send(`* ID ("name" "Open Mail Server")\r\n`);
           reader.send(`${tag} OK ID completed\r\n`);
           return;
         }
-        if (command === "ENABLE" || command === "NAMESPACE") {
-          if (command === "NAMESPACE") {
+        if (command === ImapCommand.Enable || command === ImapCommand.Namespace) {
+          if (command === ImapCommand.Namespace) {
             reader.send('* NAMESPACE (("" "/")) NIL NIL\r\n');
           }
           reader.send(`${tag} OK ${command} completed\r\n`);
           return;
         }
-        if (command === "STARTTLS") {
+        if (command === ImapCommand.StartTls) {
           if (session.secure || session.account) {
             reader.send(`${tag} NO STARTTLS is not available now\r\n`);
             return;
@@ -420,11 +421,11 @@ export class ImapServer {
           session.secure = true;
           return;
         }
-        if (command === "LOGIN") {
+        if (command === ImapCommand.Login) {
           await signIn(tag, String(tokens[2] || ""), String(tokens[3] || ""));
           return;
         }
-        if (command === "AUTHENTICATE") {
+        if (command === ImapCommand.Authenticate) {
           if (String(tokens[2] || "").toUpperCase() !== "PLAIN") {
             reader.send(`${tag} NO Unsupported authentication\r\n`);
             return;
@@ -442,16 +443,19 @@ export class ImapServer {
         if (!requireAccount(tag) || !session.account) {
           return;
         }
-        if (command === "LIST" || command === "LSUB") {
-          const pattern = String(tokens[3] || tokens[2] || "*");
+        if (command === ImapCommand.List || command === ImapCommand.ListSubscribed) {
+          const request = listRequest(tokens);
           const folders = await input.messageRepository.listFolders(session.account.address);
           const state = await input.messageRepository.mailboxState(session.account.address);
           for (const folder of folders) {
             const subscribed = state.subscriptions.includes(folder.storageName);
-            if (command === "LSUB" && !subscribed) {
+            if (command === ImapCommand.ListSubscribed && !subscribed) {
               continue;
             }
-            if (!matchesPattern(folder.displayName, pattern)) {
+            if (request.specialUseOnly && !folder.specialUse) {
+              continue;
+            }
+            if (!matchesPattern(folder.displayName, request.pattern)) {
               continue;
             }
             const attributes = ["\\HasNoChildren"];
@@ -463,7 +467,7 @@ export class ImapServer {
           reader.send(`${tag} OK ${command} completed\r\n`);
           return;
         }
-        if (command === "STATUS") {
+        if (command === ImapCommand.Status) {
           const folders = await input.messageRepository.listFolders(session.account.address);
           const folder = folders.find((item) => item.displayName.toLowerCase() === String(tokens[2] || "").toLowerCase());
           const requested = Array.isArray(tokens[3]) ? tokens[3].map((item) => String(item).toUpperCase()) : [];
@@ -485,31 +489,31 @@ export class ImapServer {
           reader.send(`${tag} OK STATUS completed\r\n`);
           return;
         }
-        if (command === "SELECT" || command === "EXAMINE") {
-          await selectFolder(tag, String(tokens[argumentStart] || tokens[2] || ""), command === "EXAMINE");
+        if (command === ImapCommand.Select || command === ImapCommand.Examine) {
+          await selectFolder(tag, String(tokens[argumentStart] || tokens[2] || ""), command === ImapCommand.Examine);
           return;
         }
-        if (command === "CREATE") {
+        if (command === ImapCommand.Create) {
           await input.messageRepository.createFolder(session.account.address, String(tokens[2] || ""));
           reader.send(`${tag} OK CREATE completed\r\n`);
           return;
         }
-        if (command === "DELETE") {
+        if (command === ImapCommand.Delete) {
           await input.messageRepository.deleteFolder(session.account.address, String(tokens[2] || ""));
           reader.send(`${tag} OK DELETE completed\r\n`);
           return;
         }
-        if (command === "RENAME") {
+        if (command === ImapCommand.Rename) {
           await input.messageRepository.renameFolder(session.account.address, String(tokens[2] || ""), String(tokens[3] || ""));
           reader.send(`${tag} OK RENAME completed\r\n`);
           return;
         }
-        if (command === "SUBSCRIBE" || command === "UNSUBSCRIBE") {
-          await input.messageRepository.setSubscription(session.account.address, String(tokens[2] || ""), command === "SUBSCRIBE");
+        if (command === ImapCommand.Subscribe || command === ImapCommand.Unsubscribe) {
+          await input.messageRepository.setSubscription(session.account.address, String(tokens[2] || ""), command === ImapCommand.Subscribe);
           reader.send(`${tag} OK ${command} completed\r\n`);
           return;
         }
-        if (command === "CLOSE") {
+        if (command === ImapCommand.Close) {
           if (!requireSelected(tag) || !session.selected) {
             return;
           }
@@ -520,12 +524,12 @@ export class ImapServer {
           reader.send(`${tag} OK CLOSE completed\r\n`);
           return;
         }
-        if (command === "UNSELECT") {
+        if (command === ImapCommand.Unselect) {
           session.selected = null;
           reader.send(`${tag} OK UNSELECT completed\r\n`);
           return;
         }
-        if (command === "EXPUNGE") {
+        if (command === ImapCommand.Expunge) {
           if (!requireSelected(tag) || !session.selected) {
             return;
           }
@@ -537,7 +541,7 @@ export class ImapServer {
           reader.send(`${tag} OK EXPUNGE completed\r\n`);
           return;
         }
-        if (command === "IDLE") {
+        if (command === ImapCommand.Idle) {
           if (!requireSelected(tag)) {
             return;
           }
@@ -554,23 +558,23 @@ export class ImapServer {
           reader.send("+ idling\r\n");
           return;
         }
-        if (command === "FETCH") {
+        if (command === ImapCommand.Fetch) {
           await handleFetch(tag, String(tokens[argumentStart] || ""), tokens[argumentStart + 1], useUniqueIdentifier);
           return;
         }
-        if (command === "SEARCH") {
+        if (command === ImapCommand.Search) {
           await handleSearch(tag, tokens.slice(argumentStart), useUniqueIdentifier);
           return;
         }
-        if (command === "STORE") {
+        if (command === ImapCommand.Store) {
           await handleStore(tag, String(tokens[argumentStart] || ""), String(tokens[argumentStart + 1] || ""), tokens[argumentStart + 2], useUniqueIdentifier);
           return;
         }
-        if (command === "COPY" || command === "MOVE") {
-          await handleCopy(tag, String(tokens[argumentStart] || ""), String(tokens[argumentStart + 1] || ""), useUniqueIdentifier, command === "MOVE");
+        if (command === ImapCommand.Copy || command === ImapCommand.Move) {
+          await handleCopy(tag, String(tokens[argumentStart] || ""), String(tokens[argumentStart + 1] || ""), useUniqueIdentifier, command === ImapCommand.Move);
           return;
         }
-        if (command === "APPEND") {
+        if (command === ImapCommand.Append) {
           reader.send(`${tag} BAD APPEND requires a message literal\r\n`);
           return;
         }

@@ -14,6 +14,7 @@ import { MailProtocol } from "../protocol/enums/mailProtocol.js";
 import { listen } from "../protocol/utils/listen.js";
 import { createProtocolReader } from "../protocol/index.js";
 import { secureOptions, upgradeToTls } from "../protocol/utils/transportSecurity.js";
+import { SmtpCommand } from "./enums/smtpCommand.js";
 import type { SmtpEndpoint } from "./interfaces/smtpEndpoint.js";
 export type { SmtpEndpoint };
 
@@ -38,7 +39,6 @@ export class SmtpServer {
     deliveryService: DeliveryService;
     signInGuard: SignInGuard;
     activityLogger: ActivityLogger;
-    productName: string;
     serverName(): Promise<string>;
   }) {}
 
@@ -69,17 +69,17 @@ export class SmtpServer {
     reader.onLine = (line) => handleLine(line);
     reader.onDataBlock = (block) => acceptMessage(block);
     reader.attach(socket);
-    reader.send(`220 ${serverName} ESMTP ${input.productName} ready\r\n`);
+    reader.send(`220 ${serverName} ESMTP Open Mail Server ready\r\n`);
 
     function capabilities(): string {
       const lines = [`250-${serverName}`, "250-PIPELINING", "250-8BITMIME", "250-SMTPUTF8", `250-SIZE ${input.configuration.maximumMessageBytes}`];
       if (!session.secure) {
-        lines.push("250-STARTTLS");
+        lines.push(`250-${SmtpCommand.StartTls}`);
       }
       if (session.secure) {
         lines.push("250-AUTH PLAIN LOGIN");
       }
-      lines.push("250 HELP");
+      lines.push(`250 ${SmtpCommand.Help}`);
       const lastLine = lines.pop() || "250 HELP";
       lines.push(lastLine.startsWith("250-") ? lastLine.replace("250-", "250 ") : lastLine);
       return `${lines.join("\r\n")}\r\n`;
@@ -145,15 +145,15 @@ export class SmtpServer {
       const command = (separator === -1 ? line : line.slice(0, separator)).toUpperCase();
       const argument = separator === -1 ? "" : line.slice(separator + 1);
 
-      if (command === "EHLO" || command === "HELO") {
+      if (command === SmtpCommand.ExtendedHello || command === SmtpCommand.Hello) {
         if (!argument.trim()) {
           reader.send("501 5.5.4 Domain name required\r\n");
           return;
         }
         session.greeted = true;
         resetTransaction();
-        if (command === "HELO") {
-          reader.send(`250 ${input.productName} greets ${oneLine(argument, 200)}\r\n`);
+        if (command === SmtpCommand.Hello) {
+          reader.send(`250 Open Mail Server greets ${oneLine(argument, 200)}\r\n`);
           return;
         }
         reader.send(capabilities());
@@ -169,19 +169,19 @@ export class SmtpServer {
         return;
       }
       if (command === "QUIT") {
-        reader.send(`221 2.0.0 ${input.productName} closing\r\n`);
+        reader.send(`221 2.0.0 Open Mail Server closing\r\n`);
         reader.close();
         return;
       }
       if (command === "HELP") {
-        reader.send("214 2.0.0 Commands: EHLO HELO STARTTLS AUTH MAIL RCPT DATA RSET NOOP QUIT VRFY HELP\r\n");
+        reader.send(`214 2.0.0 Commands: ${SmtpCommand.ExtendedHello} ${SmtpCommand.Hello} ${SmtpCommand.StartTls} ${SmtpCommand.Authenticate} ${SmtpCommand.Mail} ${SmtpCommand.Recipient} ${SmtpCommand.Data} ${SmtpCommand.Reset} ${SmtpCommand.NoOperation} ${SmtpCommand.Quit} ${SmtpCommand.Verify} ${SmtpCommand.Help}\r\n`);
         return;
       }
-      if (command === "VRFY" || command === "EXPN") {
+      if (command === SmtpCommand.Verify || command === SmtpCommand.Expand) {
         reader.send("252 2.5.2 Cannot verify the address\r\n");
         return;
       }
-      if (command === "STARTTLS") {
+      if (command === SmtpCommand.StartTls) {
         if (session.secure) {
           reader.send("503 5.5.1 TLS is already active\r\n");
           return;
@@ -202,7 +202,7 @@ export class SmtpServer {
         reader.send("503 5.5.1 Say EHLO first\r\n");
         return;
       }
-      if (command === "AUTH") {
+      if (command === SmtpCommand.Authenticate) {
         if (!session.secure) {
           reader.send("530 5.7.0 Authentication requires TLS\r\n");
           return;
@@ -228,6 +228,12 @@ export class SmtpServer {
           return;
         }
         if (name === "LOGIN") {
+          if (initial) {
+            session.authenticationUsername = Buffer.from(initial, "base64").toString("utf8");
+            session.authenticationStep = "login-password";
+            reader.send("334 UGFzc3dvcmQ6\r\n");
+            return;
+          }
           session.authenticationStep = "login-username";
           reader.send("334 VXNlcm5hbWU6\r\n");
           return;
@@ -235,7 +241,7 @@ export class SmtpServer {
         reader.send("504 5.7.4 Authentication mechanism is not supported\r\n");
         return;
       }
-      if (command === "MAIL") {
+      if (command === SmtpCommand.Mail) {
         if (!/^FROM:/i.test(argument.trim())) {
           reader.send("501 5.5.4 MAIL FROM is required\r\n");
           return;
@@ -249,13 +255,19 @@ export class SmtpServer {
           reader.send("530 5.7.0 Authentication required\r\n");
           return;
         }
+        const signedInAddress = normalizeAddress(session.accountAddress);
+        if (signedInAddress && from && from !== signedInAddress) {
+          resetTransaction();
+          reader.send("550 5.7.1 Sender must match the signed-in mailbox\r\n");
+          return;
+        }
         session.mailAccepted = true;
         session.senderAddress = from;
         session.recipients = [];
         reader.send("250 2.1.0 Sender accepted\r\n");
         return;
       }
-      if (command === "RCPT") {
+      if (command === SmtpCommand.Recipient) {
         if (!session.mailAccepted) {
           reader.send("503 5.5.1 Say MAIL first\r\n");
           return;
@@ -273,7 +285,7 @@ export class SmtpServer {
         reader.send("250 2.1.5 Recipient accepted\r\n");
         return;
       }
-      if (command === "DATA") {
+      if (command === SmtpCommand.Data) {
         if (!session.mailAccepted) {
           reader.send("503 5.5.1 Say MAIL first\r\n");
           return;

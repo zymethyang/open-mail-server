@@ -1,8 +1,10 @@
 import type { Server } from "node:http";
 import { AccountRepository } from "../../src/components/account/index.js";
 import { ActivityLogger } from "../../src/components/activity/index.js";
-import { describeCertificateMaterial, loadCertificate, storeCertificateMaterial } from "../../src/components/certificate/index.js";
+import { describeCertificateMaterial, loadCertificate, prepareCertificateMaterial, storeCertificateMaterial } from "../../src/components/certificate/index.js";
+import { createOutgoingSigner } from "../../src/components/domainKey/index.js";
 import { DeliveryService } from "../../src/components/delivery/index.js";
+import type { MailExchangeResolver } from "../../src/components/mailExchange/interfaces/mailExchange.js";
 import { MailboxEvents } from "../../src/components/mailboxEvents/index.js";
 import { MessageRepository } from "../../src/components/message/index.js";
 import { OrganizationRepository } from "../../src/components/organization/index.js";
@@ -65,51 +67,61 @@ export async function requestJson(
   return { status: response.status, payload, cookieHeader: cookieHeader(lines) };
 }
 
-export async function startWebConsole(): Promise<RunningWebConsole> {
+export async function startWebConsole(options: { configuredDomain?: string; serverName?: string; mailExchangeResolver?: (sink: SmtpSink) => MailExchangeResolver } = {}): Promise<RunningWebConsole> {
   const storageDirectory = await createTemporaryStorage();
   const sink = await startSmtpSink();
   const configuration = testConfiguration(storageDirectory);
+  if (options.configuredDomain) {
+    configuration.configuredDomain = options.configuredDomain;
+  }
   configuration.publicHostname = "127.0.0.1";
   configuration.maximumMessageBytes = 4096;
   const accountRepository = new AccountRepository(storageDirectory);
   const organizationRepository = new OrganizationRepository(storageDirectory);
-  const messageRepository = new MessageRepository(storageDirectory, new MailboxEvents());
+  const mailboxEvents = new MailboxEvents();
+  const messageRepository = new MessageRepository(storageDirectory, mailboxEvents);
   const sessionRepository = new SessionRepository(storageDirectory);
   const activityLogger = new ActivityLogger(storageDirectory);
   const settingsRepository = new SettingsRepository(storageDirectory);
   const certificate = await loadCertificate(storageDirectory, [configuration.configuredDomain]);
+  const signingDomain = async () => (await organizationRepository.read())?.domain || configuration.configuredDomain;
   const deliveryService = new DeliveryService({
     storageDirectory,
     accountRepository,
     messageRepository,
     activityLogger,
-    mailExchangeResolver: {
-      async resolve() {
-        return [{ host: "127.0.0.1", port: sink.port }];
-      }
-    },
-    serverDomain: async () => (await organizationRepository.read())?.domain || configuration.configuredDomain,
+    mailExchangeResolver: options.mailExchangeResolver
+      ? options.mailExchangeResolver(sink)
+      : {
+          async resolve() {
+            return [{ host: "127.0.0.1", port: sink.port }];
+          }
+        },
+    serverDomain: signingDomain,
     announceName: async () => "127.0.0.1",
-    readRelay: async () => (await settingsRepository.read()).relay
+    readRelay: async () => (await settingsRepository.read()).relay,
+    signOutgoingMessage: createOutgoingSigner(storageDirectory, signingDomain)
   });
   const server = createWebServer({
     configuration,
     accountRepository,
     organizationRepository,
     messageRepository,
+    mailboxEvents,
     sessionRepository,
     activityLogger,
     deliveryService,
     signInGuard: new SignInGuard(),
     listenerStatus: [],
     certificate,
-    serverName: async () => "127.0.0.1",
+    serverName: async () => options.serverName || "127.0.0.1",
     settingsRepository,
     readCertificate: async () => describeCertificateMaterial(certificate.certificate, certificate.privateKey),
-    replaceCertificate: async (certificatePem, privateKeyPem) => {
-      const description = await storeCertificateMaterial(storageDirectory, certificatePem, privateKeyPem);
-      certificate.privateKey = `${privateKeyPem.trim()}\n`;
-      certificate.certificate = `${certificatePem.trim()}\n`;
+    replaceCertificate: async (certificatePem, privateKeyPem, intermediateCertificatesPem = "") => {
+      const prepared = prepareCertificateMaterial(certificatePem, privateKeyPem, intermediateCertificatesPem);
+      const description = await storeCertificateMaterial(storageDirectory, certificatePem, privateKeyPem, intermediateCertificatesPem);
+      certificate.privateKey = prepared.privateKey;
+      certificate.certificate = prepared.certificate;
       return description;
     }
   });

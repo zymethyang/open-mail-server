@@ -3,11 +3,15 @@ import net from "node:net";
 export interface SmtpSink {
   port: number;
   messages: string[];
+  envelopeSenders: string[];
+  envelopeRecipients: string[];
   stop(): Promise<void>;
 }
 
 export async function startSmtpSink(): Promise<SmtpSink> {
   const messages: string[] = [];
+  const envelopeSenders: string[] = [];
+  const envelopeRecipients: string[] = [];
   const server = net.createServer((socket) => {
     socket.write("220 sink.example.test ready\r\n");
     let buffer = "";
@@ -37,6 +41,12 @@ export async function startSmtpSink(): Promise<SmtpSink> {
           socket.write("250 sink.example.test\r\n");
         } else if (command === "STARTTLS") {
           socket.write("454 TLS is not available on the test sink\r\n");
+        } else if (command === "MAIL") {
+          envelopeSenders.push(line);
+          socket.write("250 ok\r\n");
+        } else if (command === "RCPT") {
+          envelopeRecipients.push(line);
+          socket.write("250 ok\r\n");
         } else if (command === "DATA") {
           socket.write("354 continue\r\n");
           collecting = true;
@@ -59,6 +69,8 @@ export async function startSmtpSink(): Promise<SmtpSink> {
   return {
     port: address.port,
     messages,
+    envelopeSenders,
+    envelopeRecipients,
     stop: () =>
       new Promise((resolve, reject) => {
         server.close((error) => {

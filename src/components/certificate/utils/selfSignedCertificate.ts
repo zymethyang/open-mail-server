@@ -72,18 +72,47 @@ function directoryName(commonName: string): Buffer {
   return sequence(encodeTag(0x31, attribute));
 }
 
-function extension(objectIdentifier: string, value: Buffer): Buffer {
-  return sequence(encodeObjectIdentifier(objectIdentifier), encodeTag(0x04, value));
+function extension(objectIdentifier: string, value: Buffer, critical = false): Buffer {
+  const parts = [encodeObjectIdentifier(objectIdentifier)];
+  if (critical) {
+    parts.push(encodeTag(0x01, Buffer.from([0xff])));
+  }
+  parts.push(encodeTag(0x04, value));
+  return sequence(...parts);
 }
 
-function subjectAlternativeName(domains: string[]): Buffer {
-  const names = [encodeTag(0x82, Buffer.from("localhost", "ascii")), encodeTag(0x87, Buffer.from([127, 0, 0, 1]))];
-  for (const domain of domains) {
-    if (domain && domain !== "localhost") {
-      names.push(encodeTag(0x82, Buffer.from(domain, "ascii")));
+function isInternetProtocolAddress(value: string): boolean {
+  const octets = value.split(".");
+  return octets.length === 4 && octets.every((octet) => /^\d{1,3}$/.test(octet) && Number(octet) <= 255);
+}
+
+export function normalizedCertificateNames(values: string[]): string[] {
+  const names: string[] = [];
+  const add = (value: string) => {
+    if (value && !names.some((name) => name.toLowerCase() === value.toLowerCase())) {
+      names.push(value);
     }
+  };
+  add("localhost");
+  add("127.0.0.1");
+  for (const value of values) {
+    const trimmed = String(value || "").trim().replace(/\.$/, "");
+    if (!trimmed || trimmed.length > 253) {
+      continue;
+    }
+    add(isInternetProtocolAddress(trimmed) ? trimmed : trimmed.toLowerCase());
   }
-  return sequence(...names);
+  return names;
+}
+
+function subjectAlternativeName(names: string[]): Buffer {
+  const alternatives = names.map((name) => {
+    if (isInternetProtocolAddress(name)) {
+      return encodeTag(0x87, Buffer.from(name.split(".").map((octet) => Number(octet))));
+    }
+    return encodeTag(0x82, Buffer.from(name, "ascii"));
+  });
+  return sequence(...alternatives);
 }
 
 function pem(label: string, body: Buffer): string {
@@ -91,41 +120,118 @@ function pem(label: string, body: Buffer): string {
   return `-----BEGIN ${label}-----\n${base64}\n-----END ${label}-----\n`;
 }
 
-export function generateSelfSignedCertificate(domains: string[]): GeneratedCertificate {
-  const keys = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
-  const publicKeyInfo = keys.publicKey.export({ type: "spki", format: "der" });
-  const commonName = domains.find((domain) => domain && domain !== "localhost") || "localhost";
+function randomSerial(): Buffer {
   const serial = crypto.randomBytes(16);
   serial[0] &= 0x7f;
   if (serial[0] === 0) {
     serial[0] = 1;
   }
-  const now = new Date();
-  const expires = new Date(now.getTime() + 825 * 24 * 60 * 60 * 1000);
-  const extensions = encodeTag(
+  return serial;
+}
+
+function serverExtensions(names: string[]): Buffer {
+  return encodeTag(
     0xa3,
     sequence(
       extension("2.5.29.19", sequence()),
       extension("2.5.29.15", encodeTag(0x03, Buffer.from([0x00, 0xa0]))),
       extension("2.5.29.37", sequence(encodeObjectIdentifier("1.3.6.1.5.5.7.3.1"))),
-      extension("2.5.29.17", subjectAlternativeName(domains))
+      extension("2.5.29.17", subjectAlternativeName(names))
     )
   );
+}
+
+function authorityExtensions(): Buffer {
+  return encodeTag(
+    0xa3,
+    sequence(
+      extension("2.5.29.19", sequence(encodeTag(0x01, Buffer.from([0xff]))), true),
+      extension("2.5.29.15", encodeTag(0x03, Buffer.from([0x00, 0x06])), true)
+    )
+  );
+}
+
+function buildSignedCertificate(issuerName: Buffer, subjectName: Buffer, publicKeyInfo: Buffer, signingKey: crypto.KeyObject, extensions: Buffer): Buffer {
+  const now = new Date();
+  const expires = new Date(now.getTime() + 825 * 24 * 60 * 60 * 1000);
   const toBeSigned = sequence(
     encodeTag(0xa0, encodeInteger(Buffer.from([2]))),
-    encodeInteger(serial),
+    encodeInteger(randomSerial()),
     algorithmIdentifier(),
-    directoryName(commonName),
+    issuerName,
     sequence(utcTime(now), utcTime(expires)),
-    directoryName(commonName),
+    subjectName,
     publicKeyInfo,
     extensions
   );
-  const signature = crypto.sign("sha256", toBeSigned, keys.privateKey);
-  const certificate = sequence(toBeSigned, algorithmIdentifier(), encodeTag(0x03, Buffer.concat([Buffer.from([0x00]), signature])));
-  const privateKey = keys.privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+  const signature = crypto.sign("sha256", toBeSigned, signingKey);
+  return sequence(toBeSigned, algorithmIdentifier(), encodeTag(0x03, Buffer.concat([Buffer.from([0x00]), signature])));
+}
+
+function createKeyPair(): { privateKey: crypto.KeyObject; privateKeyPem: string; publicKeyInfo: Buffer } {
+  const keys = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
   return {
-    privateKey,
+    privateKey: keys.privateKey,
+    privateKeyPem: keys.privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+    publicKeyInfo: keys.publicKey.export({ type: "spki", format: "der" }) as Buffer
+  };
+}
+
+function leafCertificateNames(values: string[]): string[] {
+  const names: string[] = [];
+  for (const value of values) {
+    const trimmed = String(value || "").trim().replace(/\.$/, "");
+    if (!trimmed || trimmed.length > 253) {
+      continue;
+    }
+    const name = isInternetProtocolAddress(trimmed) ? trimmed : trimmed.toLowerCase();
+    if (!names.some((item) => item.toLowerCase() === name.toLowerCase())) {
+      names.push(name);
+    }
+  }
+  return names;
+}
+
+export function generateSelfSignedCertificate(domains: string[]): GeneratedCertificate {
+  const names = normalizedCertificateNames(domains);
+  const keys = createKeyPair();
+  const commonName = names.find((name) => name !== "localhost" && !isInternetProtocolAddress(name)) || "localhost";
+  const subjectName = directoryName(commonName);
+  const certificate = buildSignedCertificate(subjectName, subjectName, keys.publicKeyInfo, keys.privateKey, serverExtensions(names));
+  return {
+    privateKey: keys.privateKeyPem,
     certificate: pem("CERTIFICATE", certificate)
+  };
+}
+
+export interface AuthoritySignedCertificate {
+  rootCertificate: string;
+  intermediateCertificate: string;
+  certificate: string;
+  privateKey: string;
+}
+
+export function generateAuthoritySignedCertificate(names: string[]): AuthoritySignedCertificate {
+  const leafNames = leafCertificateNames(names);
+  if (!leafNames.length) {
+    throw new Error("A certificate needs a domain name");
+  }
+  const rootName = directoryName("Example Root Authority");
+  const intermediateName = directoryName("Example Intermediate Authority");
+  const leafName = directoryName(leafNames.find((name) => !isInternetProtocolAddress(name)) || leafNames[0]);
+  const rootKey = createKeyPair();
+  const intermediateKey = createKeyPair();
+  const leafKey = createKeyPair();
+  return {
+    rootCertificate: pem("CERTIFICATE", buildSignedCertificate(rootName, rootName, rootKey.publicKeyInfo, rootKey.privateKey, authorityExtensions())),
+    intermediateCertificate: pem(
+      "CERTIFICATE",
+      buildSignedCertificate(rootName, intermediateName, intermediateKey.publicKeyInfo, rootKey.privateKey, authorityExtensions())
+    ),
+    certificate: pem(
+      "CERTIFICATE",
+      buildSignedCertificate(intermediateName, leafName, leafKey.publicKeyInfo, intermediateKey.privateKey, serverExtensions(leafNames))
+    ),
+    privateKey: leafKey.privateKeyPem
   };
 }

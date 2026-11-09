@@ -21,4 +21,6 @@ export interface ActivityLogger {
   record(event: Omit<ActivityEvent, "identifier" | "occurredAt"> & { occurredAt?: string }): Promise<void>;
   query(filters: ActivityQuery): Promise<ActivityEvent[]>;
   dailyCounts(dayCount: number): Promise<ActivityDay[]>;
+  attentionEvents(): Promise<ActivityEvent[]>;
+  acknowledgeAttention(): Promise<string>;
 }

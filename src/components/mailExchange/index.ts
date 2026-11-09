@@ -1,4 +1,5 @@
 import dns from "node:dns/promises";
+import { ServerPort } from "../configuration/enums/serverPort.js";
 import type { MailExchange, MailExchangeResolver } from "./interfaces/mailExchange.js";
 
 export class DnsMailExchangeResolver implements MailExchangeResolver {
@@ -18,6 +19,6 @@ export class DnsMailExchangeResolver implements MailExchangeResolver {
         throw error;
       }
     }
-    return [{ host: domain, port: 25 }];
+    return [{ host: domain, port: ServerPort.Smtp }];
   }
 }

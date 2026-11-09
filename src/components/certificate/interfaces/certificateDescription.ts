@@ -5,4 +5,5 @@ export interface CertificateDescription {
   validUntil: string;
   names: string[];
   selfSigned: boolean;
+  intermediateCount: number;
 }

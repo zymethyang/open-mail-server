@@ -14,5 +14,15 @@ export async function createTemporaryStorage(): Promise<string> {
 }
 
 export async function removeTemporaryStorage(storageDirectory: string): Promise<void> {
-  await rm(storageDirectory, { recursive: true, force: true });
+  let latestError: unknown;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      await rm(storageDirectory, { recursive: true, force: true, maxRetries: 5, retryDelay: 40 });
+      return;
+    } catch (error) {
+      latestError = error;
+      await new Promise((resolve) => setTimeout(resolve, 40 * (attempt + 1)));
+    }
+  }
+  throw latestError;
 }

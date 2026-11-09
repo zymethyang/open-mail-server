@@ -1,0 +1,76 @@
+.stack-card { margin-top: var(--space-5); }
+#settings-form .hint { padding-bottom: 0; }
+#settings-form .hint + .fold { margin-top: var(--space-4); }
+#settings-form .fold-body { padding-bottom: var(--space-4); }
+#settings-form .fold + .form-actions { margin-top: var(--space-4); }
+#certificate-card .record-list { margin-bottom: 0; }
+#certificate-card .choice { margin-bottom: 0; }
+#certificate-card + .modal + .fold { margin-top: var(--space-5); }
+.modal {
+  width: min(440px, calc(100vw - 32px));
+  margin: auto;
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: var(--color-background);
+  color: var(--color-foreground);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.12);
+}
+.modal::backdrop { background: rgba(15, 23, 42, 0.32); }
+.modal label {
+  display: block;
+  font-weight: 600;
+  margin: var(--space-4) 0 var(--space-2);
+  line-height: 1.3;
+}
+.modal .error-summary + label { margin-top: 0; }
+.modal .hint { padding-bottom: 0; }
+#dns-records > .hint { margin-top: 0; margin-bottom: var(--space-3); padding-bottom: 0; }
+#dns-records > .hint + .hint { margin-bottom: var(--space-2); }
+#dns-records .table-wrap { margin-bottom: var(--space-4); }
+#dns-records .form-actions { margin-top: 0; margin-bottom: var(--space-3); }
+#dns-records .dns-zone { margin-bottom: var(--space-3); }
+#dns-records td { vertical-align: top; }
+#dns-records .copy-cell { flex-wrap: wrap; max-width: 100%; }
+#dns-records .copy-cell span { overflow-wrap: anywhere; min-width: 0; }
+.copy-cell { display: inline-flex; align-items: center; justify-content: flex-start; gap: 8px; }
+.public-address {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-background);
+}
+.copy-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 12px;
+  font-size: 13px;
+  line-height: 1;
+}
+.dns-zone {
+  margin: 0;
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-muted);
+  padding: var(--space-3);
+  white-space: pre;
+  line-height: 1.5;
+}
+
+.fold-status {
+  margin-left: auto;
+  color: var(--color-muted-foreground);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.card label.choice, .panel label.choice, .fold-body label.choice { display: flex; align-items: flex-start; gap: var(--space-2); font-weight: 600; margin-top: var(--space-4); }
+.choice input { width: auto; min-height: 0; margin: 3px 0 0; }

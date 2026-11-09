@@ -36,6 +36,30 @@ export function parseAddressList(value: unknown): string[] {
     .filter(Boolean);
 }
 
+const recipientTokenPattern = /(?:[^<>,;\s]+(?:\s+[^<>,;\s]+)*\s*)?<[^<>]+>|[^<>,;\s]+/g;
+
+export function recipientTokens(text: string): string[] {
+  return (String(text ?? "").match(recipientTokenPattern) || []).map((token) => {
+    const wrapped = token.match(/<([^<>]+)>/);
+    return normalizeAddress(wrapped ? wrapped[1] : token);
+  }).filter(Boolean);
+}
+
+export function commitRecipientText(existing: string[], text: string): { addresses: string[]; invalid: string } {
+  const pieces = recipientTokens(text);
+  const invalid = pieces.find((address) => !isValidAddress(address)) || "";
+  if (invalid) {
+    return { addresses: [...existing], invalid };
+  }
+  const addresses = [...existing];
+  for (const address of pieces) {
+    if (!addresses.includes(address)) {
+      addresses.push(address);
+    }
+  }
+  return { addresses, invalid: "" };
+}
+
 export function assertAddressList(values: string[], label: string): void {
   if (!values.length) {
     throw Object.assign(new Error(`${label} is required`), { statusCode: 400 });

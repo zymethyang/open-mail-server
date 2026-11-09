@@ -4,8 +4,7 @@ import { ActivityAction } from "./enums/activityAction.js";
 import { ActivityResult } from "./enums/activityResult.js";
 import type { ActivityDay, ActivityLogger as ActivityLoggerContract, ActivityQuery } from "./interfaces/activityLogger.js";
 import type { ActivityEvent } from "./interfaces/activityEvent.js";
-import { withLock } from "../jsonFile/index.js";
-import { parseStoredJson } from "../jsonFile/index.js";
+import { parseStoredJson, readJson, withLock, writeJson } from "../jsonFile/index.js";
 import { sealValue } from "../secureStorage/index.js";
 import { appendFile, mkdir, readdir, readFile } from "node:fs/promises";
 
@@ -15,6 +14,19 @@ function dayKey(date: Date): string {
 
 function createActivityLogger(storageDirectory: string): ActivityLoggerContract {
   const directory = path.join(storageDirectory, "activity");
+  const acknowledgementPath = path.join(storageDirectory, "attention.json");
+
+  async function readAcknowledgedAt(): Promise<string> {
+    try {
+      const stored = await readJson<{ acknowledgedAt?: string }>(acknowledgementPath);
+      return typeof stored.acknowledgedAt === "string" ? stored.acknowledgedAt : "";
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return "";
+      }
+      throw error;
+    }
+  }
 
   async function readDay(date: string): Promise<ActivityEvent[]> {
     const filePath = path.join(directory, `${date}.jsonl`);
@@ -22,7 +34,7 @@ function createActivityLogger(storageDirectory: string): ActivityLoggerContract 
       const contents = await readFile(filePath, "utf8");
       const events: ActivityEvent[] = [];
       for (const line of contents.split("\n").filter(Boolean)) {
-        events.push(await parseStoredJson<ActivityEvent>(line));
+        events.push(await parseStoredJson<ActivityEvent>(line, `${date}.jsonl`));
       }
       return events;
     } catch (error) {
@@ -49,8 +61,9 @@ function createActivityLogger(storageDirectory: string): ActivityLoggerContract 
       };
       await withLock("activity", async () => {
         await mkdir(directory, { recursive: true });
-        const filePath = path.join(directory, `${dayKey(new Date(occurredAt))}.jsonl`);
-        const sealed = await sealValue(stored);
+        const fileName = `${dayKey(new Date(occurredAt))}.jsonl`;
+        const filePath = path.join(directory, fileName);
+        const sealed = await sealValue(stored, fileName);
         await appendFile(filePath, `${JSON.stringify(sealed)}\n`, "utf8");
       });
     },
@@ -129,6 +142,32 @@ function createActivityLogger(storageDirectory: string): ActivityLoggerContract 
         days.push(day);
       }
       return days;
+    },
+
+    async attentionEvents() {
+      const acknowledgedAt = await readAcknowledgedAt();
+      const today = dayKey(new Date());
+      const events = await readDay(today);
+      return events
+        .filter((event) => {
+          const needsAttention =
+            event.result === ActivityResult.Failed ||
+            event.result === ActivityResult.Rejected ||
+            event.result === ActivityResult.Queued;
+          if (!needsAttention) {
+            return false;
+          }
+          return !acknowledgedAt || event.occurredAt > acknowledgedAt;
+        })
+        .reverse();
+    },
+
+    async acknowledgeAttention() {
+      const acknowledgedAt = new Date().toISOString();
+      await withLock("attention", async () => {
+        await writeJson(acknowledgementPath, { acknowledgedAt });
+      });
+      return acknowledgedAt;
     }
   };
 }
@@ -150,5 +189,13 @@ export class ActivityLogger implements ActivityLoggerContract {
 
   dailyCounts(dayCount: number) {
     return this.logger.dailyCounts(dayCount);
+  }
+
+  attentionEvents() {
+    return this.logger.attentionEvents();
+  }
+
+  acknowledgeAttention() {
+    return this.logger.acknowledgeAttention();
   }
 }

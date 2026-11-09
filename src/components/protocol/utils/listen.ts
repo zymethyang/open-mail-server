@@ -1,5 +1,6 @@
 import net from "node:net";
 import tls from "node:tls";
+import { ServerPort } from "../../configuration/enums/serverPort.js";
 
 export function listen(server: net.Server | tls.Server, port: number, host: string): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -27,7 +28,7 @@ export function describeListenError(error: NodeJS.ErrnoException): string {
     return "port is already in use";
   }
   if (error.code === "EACCES" || error.code === "EPERM") {
-    return "permission denied. Port 25, 465, 143, and 993 may require an administrator on Windows";
+    return `permission denied. Port ${ServerPort.Smtp}, ${ServerPort.Web}, ${ServerPort.SmtpSecure}, ${ServerPort.Imap}, and ${ServerPort.ImapSecure} may require an administrator on Windows`;
   }
   return error.message || "could not start";
 }
