@@ -10,6 +10,7 @@ describe("mail authentication records", { concurrency: 1 }, () => {
       const setup = await requestJson(consoleServer.baseUrl, "POST", "/api/setup", {
         organizationName: "Acme",
         domain: "acme.test",
+        publicAddress: "149.28.152.245",
         displayName: "Ada Admin",
         address: "ada@acme.test",
         password: "correct-horse"
@@ -32,7 +33,9 @@ describe("mail authentication records", { concurrency: 1 }, () => {
         assert.equal(senderPolicy?.value, "v=spf1 ~all");
       }
       assert.equal(domainKeyRecord?.host, "mail._domainkey.acme.test");
-      assert.equal(messagePolicy?.value, "v=DMARC1; p=none; rua=mailto:admin@acme.test");
+      assert.equal(address?.value, "149.28.152.245");
+      assert.equal(String(senderPolicy?.value).includes("ip4:149.28.152.245"), true);
+      assert.equal(messagePolicy?.value, "v=DMARC1; p=none; rua=mailto:ada@acme.test");
       const zoneLine = String(hosting.zoneFile).split("\n").find((line) => line.includes("._domainkey.")) || "";
       const quoted = zoneLine.match(/"[^"]*"/g) || [];
       assert.equal(quoted.map((chunk) => chunk.slice(1, -1)).join(""), domainKeyRecord?.value);

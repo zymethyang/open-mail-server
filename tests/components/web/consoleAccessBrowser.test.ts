@@ -31,6 +31,7 @@ describe("console access in the browser", () => {
       const setup = await requestJson(consoleServer.baseUrl, "POST", "/api/setup", {
         organizationName: "Acme",
         domain: "acme.test",
+        publicAddress: "149.28.152.245",
         displayName: "Ada Admin",
         address: "ada@acme.test",
         password: "correct-horse"

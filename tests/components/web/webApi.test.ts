@@ -52,6 +52,7 @@ describe("web console interface", { concurrency: 1 }, () => {
     const wrongDomain = await requestJson(consoleServer.baseUrl, "POST", "/api/setup", {
       organizationName: "Acme",
       domain: "example.test",
+      publicAddress: "149.28.152.245",
       displayName: "Ada Admin",
       address: "ada@example.test",
       password: "correct-horse"
@@ -60,6 +61,7 @@ describe("web console interface", { concurrency: 1 }, () => {
     const shortPassword = await requestJson(consoleServer.baseUrl, "POST", "/api/setup", {
       organizationName: "Acme",
       domain: "acme.test",
+      publicAddress: "149.28.152.245",
       displayName: "Ada Admin",
       address: "ada@acme.test",
       password: "short"
@@ -67,20 +69,36 @@ describe("web console interface", { concurrency: 1 }, () => {
     assert.equal(shortPassword.status, 400);
     assert.equal((await requestJson(consoleServer.baseUrl, "GET", "/api/bootstrap")).payload.needsSetup, true);
 
+    const privateAddress = await requestJson(consoleServer.baseUrl, "POST", "/api/setup", {
+      organizationName: "Acme",
+      domain: "acme.test",
+      publicAddress: "192.168.1.20",
+      displayName: "Ada Admin",
+      address: "ada@acme.test",
+      password: "correct-horse"
+    });
+    assert.equal(privateAddress.status, 400);
+    assert.match(String(privateAddress.payload.error), /public IP address/);
+    assert.equal((await requestJson(consoleServer.baseUrl, "GET", "/api/bootstrap")).payload.needsSetup, true);
+
     const setup = await requestJson(consoleServer.baseUrl, "POST", "/api/setup", {
       organizationName: "Acme",
       domain: "acme.test",
+      publicAddress: "149.28.152.245",
       displayName: "Ada Admin",
       address: "ada@acme.test",
       password: "correct-horse"
     });
     assert.equal(setup.status, 201);
+    assert.equal(record(setup.payload.organization).publicAddress, "149.28.152.245");
+    assert.equal(record(setup.payload.organization).administratorAddress, "ada@acme.test");
     assert.equal(JSON.stringify(setup.payload).includes("passwordHash"), false);
     administratorCookie = setup.cookieHeader;
     assert.match(administratorCookie, /^session=/);
     const again = await requestJson(consoleServer.baseUrl, "POST", "/api/setup", {
       organizationName: "Acme",
       domain: "acme.test",
+      publicAddress: "149.28.152.245",
       displayName: "Ada Admin",
       address: "ada@acme.test",
       password: "correct-horse"
@@ -92,6 +110,14 @@ describe("web console interface", { concurrency: 1 }, () => {
     const signedIn = await requestJson(consoleServer.baseUrl, "GET", "/api/bootstrap", undefined, administratorCookie);
     assert.equal(record(signedIn.payload.account).address, "ada@acme.test");
     assert.equal(record(signedIn.payload.hosting).domain, "acme.test");
+    const records = arrayOf(record(signedIn.payload.hosting).dns).map((item) => record(item));
+    const addressRecord = records.find((item) => item.type === "A" || item.type === "AAAA");
+    const senderPolicy = records.find((item) => String(item.value).startsWith("v=spf1"));
+    const messagePolicy = records.find((item) => String(item.host).startsWith("_dmarc."));
+    assert.equal(addressRecord?.value, "149.28.152.245");
+    assert.equal(String(senderPolicy?.value).includes("ip4:149.28.152.245"), true);
+    assert.equal(messagePolicy?.value, "v=DMARC1; p=none; rua=mailto:ada@acme.test");
+    assert.equal(String(record(signedIn.payload.hosting).zoneFile).includes("network card"), false);
     const anonymous = await requestJson(consoleServer.baseUrl, "GET", "/api/folders");
     assert.equal(anonymous.status, 401);
     const folders = await requestJson(consoleServer.baseUrl, "GET", "/api/folders", undefined, administratorCookie);

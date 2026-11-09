@@ -33,7 +33,9 @@
         <input id="setup-organization" name="organization" autocomplete="organization" required maxlength="80">
         <label for="setup-domain">Company domain</label>
         <input id="setup-domain" name="domain" autocomplete="off" required placeholder="acme.com">
-        <p class="hint">Use the domain this VPS will answer for. After setup, publish an MX record that points here.</p>
+        <p class="hint">Use the domain this server will answer for.</p>
+        <label for="setup-public-address">Public IP address</label>
+        <input id="setup-public-address" name="publicAddress" autocomplete="off" required placeholder="149.28.152.245" spellcheck="false">
         <label for="setup-name">Your name</label>
         <input id="setup-name" name="name" autocomplete="name" required maxlength="80">
         <label for="setup-address">Email address</label>

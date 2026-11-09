@@ -1,8 +1,34 @@
+import net from "node:net";
+
 export function isLiteralAddress(hostname: string): boolean {
-  return isDottedAddress(hostname) || hostname.includes(":");
+  return net.isIP(hostname) !== 0;
 }
 
 export function isPublicInternetAddress(address: string): boolean {
+  if (net.isIP(address) === 4) {
+    return isPublicInternetVersion4Address(address);
+  }
+  if (net.isIP(address) === 6) {
+    return isPublicInternetVersion6Address(address);
+  }
+  return false;
+}
+
+export function assertPublicAddress(value: string): string {
+  const address = value.trim();
+  if (!address) {
+    throw Object.assign(new Error("Enter the public IP address of this server."), { statusCode: 400 });
+  }
+  if (net.isIP(address) === 4 && isPublicInternetVersion4Address(address)) {
+    return address;
+  }
+  if (net.isIP(address) === 6 && isPublicInternetVersion6Address(address)) {
+    return address.toLowerCase();
+  }
+  throw Object.assign(new Error("Enter the public IP address of this server. A private or local address cannot be published in DNS."), { statusCode: 400 });
+}
+
+function isPublicInternetVersion4Address(address: string): boolean {
   if (!isDottedAddress(address)) {
     return false;
   }
@@ -28,44 +54,47 @@ export function isPublicInternetAddress(address: string): boolean {
   if (firstOctet === 198 && secondOctet === 51 && thirdOctet === 100) {
     return false;
   }
-  if (firstOctet === 203 && secondOctet === 113) {
+  if (firstOctet === 203 && secondOctet === 0 && thirdOctet === 113) {
     return false;
   }
   return true;
 }
 
-export function chooseCheckedAddress(input: {
-  hostname: string;
-  resolvedAddress: string;
-  networkAddress: string;
-}): { address: string; source: string } {
-  const hostname = input.hostname.trim().toLowerCase();
-  const resolvedAddress = isPublicInternetAddress(input.resolvedAddress.trim()) ? input.resolvedAddress.trim() : "";
-  const networkAddress = isPublicInternetAddress(input.networkAddress.trim()) ? input.networkAddress.trim() : "";
-  const localName = !hostname || hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".test");
+function isPublicInternetVersion6Address(address: string): boolean {
+  if (address.includes("%") || address.includes(".")) {
+    return false;
+  }
+  const groups = internetVersion6Groups(address.toLowerCase());
+  if (!groups) {
+    return false;
+  }
+  const firstGroup = groups[0];
+  const unspecified = groups.every((group) => group === 0);
+  const loopback = groups.slice(0, 7).every((group) => group === 0) && groups[7] === 1;
+  const linkLocal = (firstGroup & 0xffc0) === 0xfe80;
+  const uniqueLocal = (firstGroup & 0xfe00) === 0xfc00;
+  const multicast = (firstGroup & 0xff00) === 0xff00;
+  const documentation = firstGroup === 0x2001 && groups[1] === 0x0db8;
+  const mappedVersion4 = groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff;
+  return !unspecified && !loopback && !linkLocal && !uniqueLocal && !multicast && !documentation && !mappedVersion4;
+}
 
-  if (isLiteralAddress(hostname)) {
-    return { address: hostname, source: "configured address" };
+function internetVersion6Groups(address: string): number[] | null {
+  const halves = address.split("::");
+  if (halves.length > 2) {
+    return null;
   }
-  if (networkAddress && resolvedAddress === networkAddress) {
-    return { address: networkAddress, source: `address record for ${hostname}` };
+  const left = halves[0] ? halves[0].split(":") : [];
+  const right = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+  const missing = 8 - left.length - right.length;
+  if (missing < 0 || (halves.length === 2 && missing < 1) || (halves.length === 1 && missing !== 0)) {
+    return null;
   }
-  if (networkAddress && resolvedAddress && resolvedAddress !== networkAddress) {
-    return {
-      address: networkAddress,
-      source: `${hostname} points at ${resolvedAddress}. The public address on this machine's network card is ${networkAddress}`
-    };
+  const filled = halves.length === 2 ? [...left, ...Array(missing).fill("0"), ...right] : left;
+  if (filled.length !== 8 || filled.some((group) => !/^[0-9a-f]{1,4}$/.test(group))) {
+    return null;
   }
-  if (networkAddress) {
-    return { address: networkAddress, source: "public address on a network card" };
-  }
-  if (localName) {
-    return {
-      address: "",
-      source: `${hostname || "This name"} is not a public hostname, and no network card has a public address.`
-    };
-  }
-  return { address: "", source: "No network card on this server has a public address." };
+  return filled.map((group) => Number.parseInt(group, 16));
 }
 
 function isDottedAddress(address: string): boolean {

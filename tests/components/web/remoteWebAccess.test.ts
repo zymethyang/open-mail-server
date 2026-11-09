@@ -57,6 +57,7 @@ describe("web console from another computer", { concurrency: 1 }, () => {
       body: JSON.stringify({
         organizationName: "Acme",
         domain: "acme.test",
+        publicAddress: "149.28.152.245",
         displayName: "Ada Admin",
         address: "ada@acme.test",
         password: "correct-horse"

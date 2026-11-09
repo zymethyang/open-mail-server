@@ -33,6 +33,6 @@ The remote account must be able to run sudo, unless it is already root.
 
 ## When it finishes
 
-Tell the user to open `https://<host>`. The browser warns because the certificate is self-signed. The first visit creates the company and the administrator account.
+Tell the user to open `https://<host>`. The browser warns because the certificate is self-signed. The first visit creates the company and the administrator account. The public IP address entered on that page is the address published in DNS.
 
 When a step fails, show the error with the password removed, then stop.

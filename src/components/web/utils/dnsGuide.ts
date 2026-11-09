@@ -11,8 +11,15 @@ export interface DnsGuide {
   zoneFile: string;
 }
 
-export function createDnsGuide(domain: string, hostname: string, publicAddress: string, domainKeyValue = ""): DnsGuide {
+export function createDnsGuide(
+  domain: string,
+  hostname: string,
+  publicAddress: string,
+  domainKeyValue = "",
+  reportAddress = ""
+): DnsGuide {
   const address = publicAddress.trim();
+  const reportMailbox = reportAddress.trim() || `admin@${domain}`;
   const addressRecord: DnsGuideRecord = address.includes(":")
     ? { type: "AAAA", host: hostname, value: address }
     : { type: "A", host: hostname, value: address };
@@ -21,7 +28,7 @@ export function createDnsGuide(domain: string, hostname: string, publicAddress: 
     { type: "MX", host: domain, value: `10 ${hostname}` },
     { type: "TXT", host: domain, value: senderPolicy(address) },
     ...(domainKeyValue ? [{ type: "TXT", host: `${domainKeySelector}._domainkey.${domain}`, value: domainKeyValue }] : []),
-    { type: "TXT", host: `_dmarc.${domain}`, value: `v=DMARC1; p=none; rua=mailto:admin@${domain}` }
+    { type: "TXT", host: `_dmarc.${domain}`, value: `v=DMARC1; p=none; rua=mailto:${reportMailbox}` }
   ];
   return { records, zoneFile: formatZoneFile(records) };
 }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ConsoleBrowser } from "../../support/consoleBrowser.js";
-import { requestJson, startWebConsole } from "../../support/webConsole.js";
+import { startWebConsole } from "../../support/webConsole.js";
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -21,42 +21,96 @@ async function waitFor(browser: ConsoleBrowser, description: string, expression:
   throw new Error(`${description}. The page reported ${latest || "nothing"}`);
 }
 
+async function submitSetup(browser: ConsoleBrowser, publicAddress: string): Promise<void> {
+  const outcome = await waitFor(
+    browser,
+    "The setup form should be ready",
+    `(() => {
+      const form = document.querySelector("#setup-form");
+      const organization = document.querySelector("#setup-organization");
+      const domain = document.querySelector("#setup-domain");
+      const publicAddressField = document.querySelector("#setup-public-address");
+      const name = document.querySelector("#setup-name");
+      const address = document.querySelector("#setup-address");
+      const password = document.querySelector("#setup-password");
+      if (!(form instanceof HTMLFormElement) || !(organization instanceof HTMLInputElement) || !(domain instanceof HTMLInputElement) || !(publicAddressField instanceof HTMLInputElement) || !(name instanceof HTMLInputElement) || !(address instanceof HTMLInputElement) || !(password instanceof HTMLInputElement)) {
+        return "waiting";
+      }
+      if (domain.value !== "acme.test") {
+        return "waiting";
+      }
+      organization.value = "Acme";
+      publicAddressField.value = ${JSON.stringify(publicAddress)};
+      name.value = "Ada Admin";
+      address.value = "ada@acme.test";
+      password.value = "correct-horse";
+      form.requestSubmit();
+      return "submitted";
+    })()`
+  );
+  assert.equal(outcome, "submitted");
+}
+
 describe("public address", () => {
-  it("shows the address from the network card on the settings page", { timeout: 120000 }, async () => {
+  it("asks for the public IP address while creating the administrator", { timeout: 120000 }, async () => {
     const consoleServer = await startWebConsole({ serverName: "mail.acme.test" });
     const browser = await ConsoleBrowser.open();
     try {
-      const setup = await requestJson(consoleServer.baseUrl, "POST", "/api/setup", {
-        organizationName: "Acme",
-        domain: "acme.test",
-        displayName: "Ada Admin",
-        address: "ada@acme.test",
-        password: "correct-horse"
-      });
-      assert.equal(setup.status, 201);
       await browser.openAddress(`${consoleServer.baseUrl}/`);
-      await browser.signIn("ada@acme.test", "correct-horse");
-      await browser.followHash("#settings");
-      const text = await waitFor(
+      const setupText = await waitFor(
         browser,
-        "The DNS records should explain the public address",
+        "The setup form should ask for the public IP address",
         `(() => {
-          const records = document.querySelector("#dns-records");
-          if (!(records instanceof HTMLElement) || !records.innerText.includes("v=spf1")) {
+          const form = document.querySelector("#setup-form");
+          if (!(form instanceof HTMLElement) || !form.innerText.includes("Public IP address")) {
             return "waiting";
           }
-          return records.innerText.replace(/\\s+/g, " ").trim();
+          return form.innerText.replace(/\\s+/g, " ").trim();
         })()`
       );
-      assert.equal(text.includes("reach the internet"), false);
-      assert.equal(text.includes("ipify"), false);
-      assert.equal(text.includes("amazonaws"), false);
-      assert.equal(text.includes("Public address of this server"), false);
-      assert.equal(text.includes("No network card on this server has a public address."), false);
-      assert.equal(text.includes("Public address not found"), false);
-      assert.equal(text.includes("<table") || text.includes("Type Name Value"), false);
-      assert.match(text, /\b(?:\d{1,3}\.){3}\d{1,3}\b/);
-      assert.equal(text.includes("ip4:"), true);
+      assert.equal(setupText.includes("Public IP address"), true);
+      assert.equal(setupText.includes("DMARC reports are sent to this address."), false);
+      assert.equal(setupText.includes("network card"), false);
+
+      await submitSetup(browser, "192.168.1.20");
+      const problem = await waitFor(
+        browser,
+        "A private address should stay on the setup form",
+        `(() => {
+          const summary = document.querySelector("#setup-summary");
+          const field = document.querySelector("#setup-public-address");
+          if (!(summary instanceof HTMLElement) || summary.hidden || !(field instanceof HTMLInputElement) || field.getAttribute("aria-invalid") !== "true") {
+            return "waiting";
+          }
+          return summary.innerText.replace(/\\s+/g, " ").trim();
+        })()`
+      );
+      assert.match(problem, /public IP address/);
+      assert.equal(problem.includes("network card"), false);
+
+      await submitSetup(browser, "149.28.152.245");
+      await browser.waitUntil("The administrator should land on the overview", (page) => !page.applicationHidden && page.hash === "#overview");
+      await browser.followHash("#settings");
+      const records = await waitFor(
+        browser,
+        "DNS records should use the entered public IP address and administrator email",
+        `(() => {
+          const zone = document.querySelector("#dns-zone-file");
+          if (!(zone instanceof HTMLElement) || !zone.innerText.includes("v=spf1")) {
+            return "waiting";
+          }
+          return zone.innerText;
+        })()`
+      );
+      assert.equal(records.includes("149.28.152.245"), true);
+      assert.equal(records.includes("v=spf1 ip4:149.28.152.245 ~all"), true);
+      assert.equal(records.includes("v=DMARC1; p=none; rua=mailto:ada@acme.test"), true);
+      assert.equal(records.includes("admin@acme.test"), false);
+      assert.equal(records.includes("192.168.1.20"), false);
+      assert.equal(records.includes("network card"), false);
+      const pageText = await browser.script(`document.body.innerText`);
+      assert.equal(String(pageText).includes("No network card"), false);
+      assert.equal(String(pageText).includes("network card"), false);
     } finally {
       await browser.close();
       await consoleServer.stop();

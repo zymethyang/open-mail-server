@@ -30,6 +30,14 @@ describe("dns guide", () => {
     assert.equal(recordValue(guide.records, "v=spf1"), "v=spf1 ip6:2001:db8::1 ~all");
   });
 
+  it("sends DMARC reports to the administrator email address", () => {
+    const guide = createDnsGuide("acme.test", "mail.acme.test", "149.28.152.245", "", "ada@acme.test");
+    assert.equal(guide.records[0].value, "149.28.152.245");
+    assert.equal(recordValue(guide.records, "v=spf1"), "v=spf1 ip4:149.28.152.245 ~all");
+    assert.equal(guide.records.find((record) => record.host === "_dmarc.acme.test")?.value, "v=DMARC1; p=none; rua=mailto:ada@acme.test");
+    assert.match(guide.zoneFile, /_dmarc\.acme\.test\.\t300\tIN\tTXT\t"v=DMARC1; p=none; rua=mailto:ada@acme\.test"/);
+  });
+
   it("leaves the address blank when this server cannot discover it", () => {
     const guide = createDnsGuide("acme.test", "mail.acme.test", "  ");
     assert.equal(guide.records[0].value, "");

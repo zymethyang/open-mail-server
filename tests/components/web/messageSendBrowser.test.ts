@@ -105,6 +105,7 @@ describe("composer send errors in the browser", () => {
       const setup = await requestJson(consoleServer.baseUrl, "POST", "/api/setup", {
         organizationName: "Acme",
         domain: "acme.com",
+        publicAddress: "149.28.152.245",
         displayName: "Ada Admin",
         address: "ada@acme.com",
         password: "correct-horse"

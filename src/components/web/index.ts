@@ -20,7 +20,8 @@ import type { MailboxEvents } from "../mailboxEvents/interfaces/mailboxEvents.js
 import type { PublicAccount } from "../account/interfaces/accountRecord.js";
 import { assertAddressList, isValidAddress, normalizeAddress, parseAddressList } from "../text/index.js";
 import type { DeliveryService } from "../delivery/index.js";
-import { addressForDnsRecords, checkPublicPorts, locatePublicAddress } from "../publicPort/index.js";
+import { checkPublicPorts } from "../publicPort/index.js";
+import type { OrganizationRecord } from "../organization/interfaces/organizationRecord.js";
 import { openDomainKey } from "../domainKey/index.js";
 import { createDnsGuide } from "./utils/dnsGuide.js";
 import { displayedImageType } from "./utils/displayedImageType.js";
@@ -314,17 +315,15 @@ export function createWebServer(dependencies: {
   readCertificate(): Promise<CertificateDescription>;
   replaceCertificate(certificatePem: string, privateKeyPem: string, intermediateCertificatesPem?: string): Promise<CertificateDescription>;
 }): http.Server | https.Server {
-  async function hostingGuide(domain: string, publicAddress = "") {
-    const hostname = (await dependencies.serverName()) || domain;
-    const discoveredAddress = publicAddress || (await locatePublicAddress(hostname)).address;
-    const address = await addressForDnsRecords(discoveredAddress);
+  async function hostingGuide(company: OrganizationRecord) {
+    const hostname = (await dependencies.serverName()) || company.domain;
     const incoming = dependencies.listenerStatus.find((item) => item.name === "IMAP" && item.security === "TLS");
     const outgoing = dependencies.listenerStatus.find((item) => item.name === "SMTP" && item.security === "STARTTLS");
     const domainKey = await openDomainKey(dependencies.configuration.storageDirectory);
-    const dnsGuide = createDnsGuide(domain, hostname, address, domainKey.recordValue);
+    const dnsGuide = createDnsGuide(company.domain, hostname, company.publicAddress, domainKey.recordValue, company.administratorAddress);
     return {
       publicHostname: hostname,
-      domain,
+      domain: company.domain,
       secureWeb: dependencies.configuration.secureWeb,
       dns: dnsGuide.records,
       zoneFile: dnsGuide.zoneFile,
@@ -352,7 +351,7 @@ export function createWebServer(dependencies: {
         organization,
         account: context.account,
         listeners: context.account?.role === AccountRole.Administrator ? dependencies.listenerStatus : [],
-        hosting: organization && context.account?.role === AccountRole.Administrator ? await hostingGuide(organization.domain) : null
+        hosting: organization && context.account?.role === AccountRole.Administrator ? await hostingGuide(organization) : null
       });
       return true;
     }
@@ -365,7 +364,9 @@ export function createWebServer(dependencies: {
       const created = await dependencies.organizationRepository.create({
         domain,
         displayName: textValue(context.body.organizationName),
-        requiredDomain: dependencies.configuration.configuredDomain
+        requiredDomain: dependencies.configuration.configuredDomain,
+        publicAddress: textValue(context.body.publicAddress),
+        administratorAddress: textValue(context.body.address)
       });
       try {
         const account = await dependencies.accountRepository.createAccount({
@@ -471,7 +472,7 @@ export function createWebServer(dependencies: {
       const queued = await dependencies.deliveryService.queuedCount();
       const attentionEvents = await dependencies.activityLogger.attentionEvents();
       const publicPorts = await checkPublicPorts(
-        await dependencies.serverName(),
+        organization?.publicAddress || "",
         dependencies.listenerStatus.map((listener) => listener.port),
         dependencies.configuration.host
       );
@@ -482,7 +483,7 @@ export function createWebServer(dependencies: {
         attention: attentionEvents.length + queued,
         mailboxCount: (await dependencies.accountRepository.listAccounts()).length,
         listeners: dependencies.listenerStatus,
-        hosting: organization ? await hostingGuide(organization.domain, publicPorts.address) : null,
+        hosting: organization ? await hostingGuide(organization) : null,
         publicPorts
       });
       return true;

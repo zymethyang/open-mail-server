@@ -17,6 +17,7 @@ export interface ConsolePageState {
   accountAddress: string;
   signInTitle: string;
   signInError: string;
+  setupHidden: boolean;
 }
 
 interface CommandResult {
@@ -42,7 +43,8 @@ const pageStateExpression = `JSON.stringify({
   mailboxOpen: Boolean(document.querySelector("#mailbox-layout")),
   accountAddress: document.querySelector("#account-label")?.textContent.trim() || "",
   signInTitle: document.querySelector("#sign-in-title")?.textContent.trim() || "",
-  signInError: document.querySelector("#sign-in-summary")?.textContent.trim() || ""
+  signInError: document.querySelector("#sign-in-summary")?.textContent.trim() || "",
+  setupHidden: document.querySelector("#setup-screen") ? Boolean(document.querySelector("#setup-screen").hidden) : true
 })`;
 
 function delay(milliseconds: number): Promise<void> {
@@ -162,7 +164,7 @@ export class ConsoleBrowser {
     await this.command("Page.navigate", { url: "about:blank" }, true);
     await this.waitUntil("The browser should leave the previous page", (page) => page.signInTitle === "" && page.applicationHidden && page.signInHidden);
     await this.command("Page.navigate", { url: pageAddress }, true);
-    await this.waitUntil("The console should finish loading", (page) => !page.signInHidden || !page.applicationHidden);
+    await this.waitUntil("The console should finish loading", (page) => !page.signInHidden || !page.applicationHidden || !page.setupHidden);
   }
 
   async signIn(address: string, password: string): Promise<ConsolePageState> {

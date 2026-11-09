@@ -46,7 +46,7 @@ docker compose up -d
 
 The mail store on the host is `./data`, mounted at `/opt/email-server/data` in the container. Keep `data/storage-key` with that directory. Stored mail can be opened only when that 32-byte file is present.
 
-Open `https://your-server`. The certificate is self-signed, so the browser asks you to continue. The first visit creates the company and the administrator account. Enter the company domain on that page.
+Open `https://your-server`. The certificate is self-signed, so the browser asks you to continue. The first visit creates the company and the administrator account. Enter the company domain, the public IP address of this server, and the administrator email on that page. DNS records and the port check use that address, and DMARC reports go to that email.
 
 ## How to connect
 

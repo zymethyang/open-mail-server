@@ -2,12 +2,26 @@ import { rm } from "node:fs/promises";
 import path from "node:path";
 import type { OrganizationRepository as OrganizationRepositoryContract } from "./interfaces/organizationRepository.js";
 import type { OrganizationRecord } from "./interfaces/organizationRecord.js";
-import { cleanDisplayName } from "../text/index.js";
+import { assertPublicAddress, isPublicInternetAddress } from "../publicPort/utils/checkedAddress.js";
+import { cleanDisplayName, domainOf, isValidAddress, normalizeAddress } from "../text/index.js";
 import { withLock } from "../jsonFile/index.js";
 import { readJson, writeJson } from "../jsonFile/index.js";
 
 function isDomain(value: string): boolean {
   return value.length > 0 && value.length <= 253 && /^(?:[a-z0-9-]+\.)*[a-z0-9-]+$/.test(value);
+}
+
+function rememberedPublicAddress(value: unknown): string {
+  const address = String(value ?? "").trim();
+  return isPublicInternetAddress(address) ? address : "";
+}
+
+function rememberedAdministratorAddress(value: unknown, domain: string): string {
+  const address = normalizeAddress(value);
+  if (!isValidAddress(address) || domainOf(address) !== domain) {
+    return "";
+  }
+  return address;
 }
 
 export function createOrganizationRepository(storageDirectory: string): OrganizationRepositoryContract {
@@ -24,6 +38,8 @@ export function createOrganizationRepository(storageDirectory: string): Organiza
           return {
             domain: stored.domain,
             displayName: cleanDisplayName(stored.displayName) || stored.domain,
+            publicAddress: rememberedPublicAddress(stored.publicAddress),
+            administratorAddress: rememberedAdministratorAddress(stored.administratorAddress, stored.domain),
             createdAt: stored.createdAt || new Date(0).toISOString()
           };
         } catch (error) {
@@ -35,9 +51,10 @@ export function createOrganizationRepository(storageDirectory: string): Organiza
       });
     },
 
-    async create({ domain, displayName, requiredDomain }) {
+    async create({ domain, displayName, requiredDomain, publicAddress, administratorAddress }) {
       const normalized = domain.trim().toLowerCase();
       const safeName = cleanDisplayName(displayName);
+      const administrator = normalizeAddress(administratorAddress);
       if (!isDomain(normalized)) {
         throw Object.assign(new Error("Enter the company domain, such as acme.com"), { statusCode: 400 });
       }
@@ -46,6 +63,13 @@ export function createOrganizationRepository(storageDirectory: string): Organiza
       }
       if (!safeName) {
         throw Object.assign(new Error("Organization name is required"), { statusCode: 400 });
+      }
+      const publishedAddress = assertPublicAddress(publicAddress);
+      if (!isValidAddress(administrator)) {
+        throw Object.assign(new Error("Enter a valid email address"), { statusCode: 400 });
+      }
+      if (domainOf(administrator) !== normalized) {
+        throw Object.assign(new Error(`Address must use the company domain ${normalized}`), { statusCode: 400 });
       }
       return withLock("organization", async () => {
         try {
@@ -62,6 +86,8 @@ export function createOrganizationRepository(storageDirectory: string): Organiza
         const record: OrganizationRecord = {
           domain: normalized,
           displayName: safeName,
+          publicAddress: publishedAddress,
+          administratorAddress: administrator,
           createdAt: new Date().toISOString()
         };
         await writeJson(filePath, record);
