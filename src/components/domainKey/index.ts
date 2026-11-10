@@ -70,10 +70,24 @@ export function signWithDomainKey(message: Buffer, domain: string, privateKey: s
   return Buffer.concat([Buffer.from(header, "utf8"), message]);
 }
 
-export function signatureMatches(message: Buffer, privateKey: string): boolean {
+export function domainKeySignatureMatches(message: Buffer, publicKeyBody: string, signatureIndex = 0): boolean {
+  const body = publicKeyBody.replace(/\s+/g, "");
+  if (!/^[A-Za-z0-9+/=]+$/.test(body)) {
+    return false;
+  }
+  const wrapped = body.match(/.{1,64}/g)?.join("\n") || body;
+  const pem = `-----BEGIN PUBLIC KEY-----\n${wrapped}\n-----END PUBLIC KEY-----\n`;
+  try {
+    return signatureMatches(message, pem, signatureIndex);
+  } catch {
+    return false;
+  }
+}
+
+export function signatureMatches(message: Buffer, privateKey: string, signatureIndex = 0): boolean {
   const parts = splitHeaderAndBody(message);
   const fields = headerFields(parts.header);
-  const signatureField = fields.find((field) => field.name === "dkim-signature");
+  const signatureField = fields.filter((field) => field.name === "dkim-signature")[signatureIndex];
   if (!signatureField) {
     return false;
   }

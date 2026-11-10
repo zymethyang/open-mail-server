@@ -1,20 +1,31 @@
 import { createHash } from "node:crypto";
-import { mkdir, open, rm, stat } from "node:fs/promises";
+import { mkdir, open, rm, stat, utimes } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 const tails = new Map<string, Promise<void>>();
 const lockDirectory = path.join(os.tmpdir(), "email-server-file-locks");
 const staleLockMilliseconds = 15_000;
+const refreshLockMilliseconds = 5_000;
+
+export function fileLockPath(name: string): string {
+  return path.join(lockDirectory, createHash("sha256").update(name).digest("hex"));
+}
 
 async function acquireFileLock(name: string): Promise<() => Promise<void>> {
   await mkdir(lockDirectory, { recursive: true });
-  const lockPath = path.join(lockDirectory, createHash("sha256").update(name).digest("hex"));
+  const lockPath = fileLockPath(name);
   for (;;) {
     try {
       const handle = await open(lockPath, "wx");
       await handle.close();
+      const refreshTimer = setInterval(() => {
+        const now = new Date();
+        void utimes(lockPath, now, now).catch(() => undefined);
+      }, refreshLockMilliseconds);
+      refreshTimer.unref?.();
       return async () => {
+        clearInterval(refreshTimer);
         await rm(lockPath, { force: true });
       };
     } catch (error) {
@@ -24,8 +35,11 @@ async function acquireFileLock(name: string): Promise<() => Promise<void>> {
       try {
         const info = await stat(lockPath);
         if (Date.now() - info.mtimeMs > staleLockMilliseconds) {
-          await rm(lockPath, { force: true });
-          continue;
+          const current = await stat(lockPath);
+          if (Date.now() - current.mtimeMs > staleLockMilliseconds) {
+            await rm(lockPath, { force: true });
+            continue;
+          }
         }
       } catch (statError) {
         if ((statError as NodeJS.ErrnoException).code === "ENOENT") {

@@ -22,3 +22,12 @@ export async function readStoredDnsGuide(configuration: Configuration): Promise<
   const guide = createDnsGuide(organization.domain, hostname, organization.publicAddress, domainKey.recordValue, organization.administratorAddress);
   return { domain: organization.domain, zoneFile: guide.zoneFile };
 }
+
+export async function readStartupDnsGuide(configuration: Configuration): Promise<StartupDnsGuide | null> {
+  try {
+    return await readStoredDnsGuide(configuration);
+  } catch (error) {
+    console.error(`The DNS guide could not be read: ${(error as Error).message}`);
+    return null;
+  }
+}

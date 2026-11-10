@@ -4,6 +4,7 @@ import type { MailExchangeResolver } from "../../mailExchange/interfaces/mailExc
 import type { MailRelaySettings } from "../../settings/interfaces/settings.js";
 import type { AccountRepository } from "../../account/interfaces/accountRepository.js";
 import type { MessageRepository } from "../../message/interfaces/messageRepository.js";
+import type { MailAuthenticationLookup } from "../../mailAuthentication/interfaces/mailAuthenticationLookup.js";
 
 export interface DeliveryRequest {
   fromAddress: string;
@@ -57,4 +58,5 @@ export interface DeliveryDependencies {
   announceName: () => Promise<string>;
   readRelay: () => Promise<MailRelaySettings>;
   signOutgoingMessage?: (rawMessage: Buffer) => Promise<Buffer>;
+  mailAuthenticationLookup?: MailAuthenticationLookup;
 }

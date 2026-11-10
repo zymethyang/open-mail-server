@@ -96,7 +96,7 @@ describe("composer send errors in the browser", () => {
       mailExchangeResolver: (sink) => ({
         async resolve() {
           await outsideCanAnswer;
-          return [{ host: "127.0.0.1", port: sink.port }];
+          return [{ host: "127.0.0.1", port: sink.port, trustedCertificate: sink.trustedCertificate }];
         }
       })
     });

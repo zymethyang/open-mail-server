@@ -24,13 +24,14 @@ describe("mail protocol flow", { concurrency: 1 }, () => {
     storageDirectory = await createTemporaryStorage();
     sink = await startSmtpSink();
     const sinkPort = sink.port;
+    const trustedCertificate = sink.trustedCertificate;
     const configuration = testConfiguration(storageDirectory);
     configuration.maximumMessageBytes = 2000;
     running = await startEmailServer({
       configuration,
       mailExchangeResolver: {
         async resolve() {
-          return [{ host: "127.0.0.1", port: sinkPort }];
+          return [{ host: "127.0.0.1", port: sinkPort, trustedCertificate }];
         }
       }
     });

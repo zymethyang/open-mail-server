@@ -1,22 +1,40 @@
 import net from "node:net";
+import tls from "node:tls";
+import { generateAuthoritySignedCertificate } from "../../src/components/certificate/utils/selfSignedCertificate.js";
+import type { MailExchange } from "../../src/components/mailExchange/interfaces/mailExchange.js";
 
 export interface SmtpSink {
   port: number;
   messages: string[];
   envelopeSenders: string[];
   envelopeRecipients: string[];
+  trustedCertificate: string;
   stop(): Promise<void>;
 }
 
-export async function startSmtpSink(): Promise<SmtpSink> {
+export function sinkMailExchange(sink: SmtpSink): MailExchange {
+  return { host: "127.0.0.1", port: sink.port, trustedCertificate: sink.trustedCertificate };
+}
+
+export async function startSmtpSink(options: { offerTransportSecurity?: boolean } = {}): Promise<SmtpSink> {
+  const offerTransportSecurity = options.offerTransportSecurity !== false;
+  const certificate = generateAuthoritySignedCertificate(["127.0.0.1"]);
+  const secureContext = tls.createSecureContext({
+    cert: `${certificate.certificate}\n${certificate.intermediateCertificate}`,
+    key: certificate.privateKey
+  });
   const messages: string[] = [];
   const envelopeSenders: string[] = [];
   const envelopeRecipients: string[] = [];
   const server = net.createServer((socket) => {
-    socket.write("220 sink.example.test ready\r\n");
+    let current: net.Socket = socket;
     let buffer = "";
     let collecting = false;
-    socket.on("data", (chunk) => {
+    let secured = false;
+    const write = (line: string) => {
+      current.write(line);
+    };
+    const onData = (chunk: Buffer) => {
       buffer += chunk.toString("utf8");
       while (true) {
         if (collecting) {
@@ -27,7 +45,7 @@ export async function startSmtpSink(): Promise<SmtpSink> {
           messages.push(buffer.slice(0, end));
           buffer = buffer.slice(end + 5);
           collecting = false;
-          socket.write("250 accepted\r\n");
+          write("250 accepted\r\n");
           continue;
         }
         const splitAt = buffer.indexOf("\r\n");
@@ -38,26 +56,43 @@ export async function startSmtpSink(): Promise<SmtpSink> {
         buffer = buffer.slice(splitAt + 2);
         const command = line.split(" ")[0].toUpperCase();
         if (command === "EHLO" || command === "HELO") {
-          socket.write("250 sink.example.test\r\n");
+          if (offerTransportSecurity && !secured) {
+            write("250-sink.example.test\r\n250 STARTTLS\r\n");
+          } else {
+            write("250 sink.example.test\r\n");
+          }
         } else if (command === "STARTTLS") {
-          socket.write("454 TLS is not available on the test sink\r\n");
+          if (!offerTransportSecurity || secured) {
+            write("454 TLS is not available on the test sink\r\n");
+            continue;
+          }
+          write("220 Ready to start TLS\r\n");
+          socket.removeListener("data", onData);
+          const secureSocket = new tls.TLSSocket(socket, { isServer: true, secureContext });
+          current = secureSocket;
+          secured = true;
+          buffer = "";
+          secureSocket.on("data", onData);
+          secureSocket.on("error", () => secureSocket.destroy());
         } else if (command === "MAIL") {
           envelopeSenders.push(line);
-          socket.write("250 ok\r\n");
+          write("250 ok\r\n");
         } else if (command === "RCPT") {
           envelopeRecipients.push(line);
-          socket.write("250 ok\r\n");
+          write("250 ok\r\n");
         } else if (command === "DATA") {
-          socket.write("354 continue\r\n");
+          write("354 continue\r\n");
           collecting = true;
         } else if (command === "QUIT") {
-          socket.write("221 bye\r\n");
-          socket.end();
+          write("221 bye\r\n");
+          current.end();
         } else {
-          socket.write("250 ok\r\n");
+          write("250 ok\r\n");
         }
       }
-    });
+    };
+    write("220 sink.example.test ready\r\n");
+    socket.on("data", onData);
   });
   await new Promise<void>((resolve) => {
     server.listen(0, "127.0.0.1", () => resolve());
@@ -71,6 +106,7 @@ export async function startSmtpSink(): Promise<SmtpSink> {
     messages,
     envelopeSenders,
     envelopeRecipients,
+    trustedCertificate: certificate.rootCertificate,
     stop: () =>
       new Promise((resolve, reject) => {
         server.close((error) => {

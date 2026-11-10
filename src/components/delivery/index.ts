@@ -2,6 +2,10 @@ import { randomBytes } from "node:crypto";
 import { readdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { readJson, writeJson } from "../jsonFile/index.js";
+import { withLock } from "../jsonFile/utils/fileLock.js";
+import { emptyMailAuthenticationLookup } from "../mailAuthentication/dnsLookup.js";
+import { InboundDisposition } from "../mailAuthentication/enums/inboundDisposition.js";
+import { authenticateInboundMessage } from "../mailAuthentication/utils/inboundAuthentication.js";
 import type { DeliveryDependencies, DeliveryService as DeliveryServiceContract, FailedEmail } from "./interfaces/delivery.js";
 import type { QueuedDelivery } from "./interfaces/queuedDelivery.js";
 import type { MailRelaySettings } from "../settings/interfaces/settings.js";
@@ -39,6 +43,7 @@ function assertSignedInSender(rawBuffer: Buffer, envelopeAddress: string, authen
 
 function createDeliveryService(dependencies: DeliveryDependencies): DeliveryServiceContract {
   const queueDirectory = path.join(dependencies.storageDirectory, "outbound-queue");
+  const mailAuthenticationLookup = dependencies.mailAuthenticationLookup || emptyMailAuthenticationLookup();
 
   async function writeQueue(item: QueuedDelivery): Promise<void> {
     await writeJson(queuedFilePath(item.identifier), item);
@@ -221,14 +226,28 @@ function createDeliveryService(dependencies: DeliveryDependencies): DeliveryServ
     return "waiting";
   }
 
-  async function sendQueued(item: QueuedDelivery, protocol: MailProtocol): Promise<"sent" | "waiting" | "givenUp"> {
-    try {
-      await sendExternal(item);
-      await recordAccepted(item, protocol);
-      return "sent";
-    } catch (error) {
-      return recordAnotherFailure(item, error, protocol);
-    }
+  async function sendQueued(item: QueuedDelivery, protocol: MailProtocol, sendNow: boolean): Promise<"sent" | "waiting" | "givenUp"> {
+    return withLock(`outbound-item:${item.identifier}`, async () => {
+      let current: QueuedDelivery;
+      try {
+        current = await readJson<QueuedDelivery>(queuedFilePath(item.identifier));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          return "sent";
+        }
+        throw error;
+      }
+      if (!sendNow && Date.parse(current.nextAttemptAt) > Date.now()) {
+        return "waiting";
+      }
+      try {
+        await sendExternal(current);
+        await recordAccepted(current, protocol);
+        return "sent";
+      } catch (error) {
+        return recordAnotherFailure(current, error, protocol);
+      }
+    });
   }
 
   return {
@@ -271,10 +290,21 @@ function createDeliveryService(dependencies: DeliveryDependencies): DeliveryServ
         throw deliveryError(`Mailboxes ${missingRecipients.join(", ")} do not exist`);
       }
 
+      let destinationFolder = MailFolderName.Inbox;
+      if (!request.authenticatedAddress && localRecipients.length) {
+        const verdict = await authenticateInboundMessage(request.rawBuffer, envelopeFrom, request.remoteAddress, mailAuthenticationLookup);
+        if (verdict.disposition === InboundDisposition.Reject) {
+          throw deliveryError(verdict.detail);
+        }
+        if (verdict.disposition === InboundDisposition.Quarantine) {
+          destinationFolder = MailFolderName.Junk;
+        }
+      }
+
       const parsed = parseRawMessage(request.rawBuffer);
       const message = createStoredMessage(parsed, request.rawBuffer, envelopeFrom || request.authenticatedAddress);
       for (const recipient of localRecipients) {
-        await dependencies.messageRepository.appendMessage(recipient, MailFolderName.Inbox, {
+        await dependencies.messageRepository.appendMessage(recipient, destinationFolder, {
           ...message,
           seen: false,
           draft: false,
@@ -342,7 +372,7 @@ function createDeliveryService(dependencies: DeliveryDependencies): DeliveryServ
         if (request.acceptExternalImmediately) {
           await writeQueue(queued);
           queuedRecipients.push(...externalRecipients);
-          void sendQueued(queued, request.protocol).catch((error: unknown) => {
+          void sendQueued(queued, request.protocol, true).catch((error: unknown) => {
             console.error(oneLine((error as Error).message, 300));
           });
         } else {
@@ -391,7 +421,7 @@ function createDeliveryService(dependencies: DeliveryDependencies): DeliveryServ
         if (Date.parse(item.nextAttemptAt) > Date.now()) {
           continue;
         }
-        await sendQueued(item, MailProtocol.Smtp);
+        await sendQueued(item, MailProtocol.Smtp, false);
       }
     },
 
@@ -415,7 +445,7 @@ function createDeliveryService(dependencies: DeliveryDependencies): DeliveryServ
       const sent: string[] = [];
       const givenUp: string[] = [];
       for (const item of selected) {
-        const outcome = await sendQueued(item, MailProtocol.Web);
+        const outcome = await sendQueued(item, MailProtocol.Web, true);
         if (outcome === "sent") {
           sent.push(item.identifier);
         } else if (outcome === "givenUp") {

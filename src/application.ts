@@ -1,7 +1,7 @@
 import os from "node:os";
 import { startEmailServer } from "./components/emailServer/index.js";
 import { startupBanner } from "./components/emailServer/utils/startupBanner.js";
-import { readStoredDnsGuide } from "./components/web/utils/startupDnsGuide.js";
+import { readStartupDnsGuide } from "./components/web/utils/startupDnsGuide.js";
 
 function networkAddresses(): string[] {
   const addresses: string[] = [];
@@ -30,7 +30,7 @@ if (!started.length) {
 
 const connectionHost =
   running.configuration.host === "0.0.0.0" || running.configuration.host === "::" ? "127.0.0.1" : running.configuration.host;
-const dnsGuide = await readStoredDnsGuide(running.configuration);
+const dnsGuide = await readStartupDnsGuide(running.configuration);
 console.log(startupBanner({
   storageDirectory: running.configuration.storageDirectory,
   connectionHost,

@@ -29,6 +29,37 @@ describe("web console from another computer", { concurrency: 1 }, () => {
     const address = networkAddresses()[0];
     assert.ok(address, "This computer has no network address for another computer to use");
     baseUrl = `http://${address}:${listener.port}`;
+    const localUrl = `http://127.0.0.1:${listener.port}`;
+
+    const blocked = await fetch(`${baseUrl}/`);
+    assert.equal(blocked.status, 403);
+    const blockedSetup = await fetch(`${baseUrl}/api/setup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: baseUrl },
+      body: JSON.stringify({
+        organizationName: "Acme",
+        domain: "acme.test",
+        publicAddress: "149.28.152.245",
+        displayName: "Ada Admin",
+        address: "ada@acme.test",
+        password: "correct-horse"
+      })
+    });
+    assert.equal(blockedSetup.status, 403);
+
+    const setup = await fetch(`${localUrl}/api/setup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: localUrl },
+      body: JSON.stringify({
+        organizationName: "Acme",
+        domain: "acme.test",
+        publicAddress: "149.28.152.245",
+        displayName: "Ada Admin",
+        address: "ada@acme.test",
+        password: "correct-horse"
+      })
+    });
+    assert.equal(setup.status, 201);
 
     const home = await fetch(`${baseUrl}/`);
     const html = await home.text();
@@ -51,20 +82,13 @@ describe("web console from another computer", { concurrency: 1 }, () => {
     });
     assert.equal(wrongPassword.status, 401);
 
-    const setup = await fetch(`${baseUrl}/api/setup`, {
+    const signedIn = await fetch(`${baseUrl}/api/session`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Origin: baseUrl },
-      body: JSON.stringify({
-        organizationName: "Acme",
-        domain: "acme.test",
-        publicAddress: "149.28.152.245",
-        displayName: "Ada Admin",
-        address: "ada@acme.test",
-        password: "correct-horse"
-      })
+      body: JSON.stringify({ address: "ada@acme.test", password: "correct-horse" })
     });
-    assert.equal(setup.status, 201);
-    const cookie = (setup.headers.getSetCookie?.() || []).find((line) => line.startsWith("session=")) || "";
+    assert.equal(signedIn.status, 200);
+    const cookie = (signedIn.headers.getSetCookie?.() || []).find((line) => line.startsWith("session=")) || "";
     assert.match(cookie, /^session=/);
     assert.equal(cookie.includes("Secure"), false);
 

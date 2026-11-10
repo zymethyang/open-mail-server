@@ -3,7 +3,9 @@ import { describe, it } from "node:test";
 import { OrganizationRepository } from "../../../src/components/organization/index.js";
 import { RelaySecurity } from "../../../src/components/settings/enums/relaySecurity.js";
 import { SettingsRepository } from "../../../src/components/settings/index.js";
-import { readStoredDnsGuide } from "../../../src/components/web/utils/startupDnsGuide.js";
+import { writeJson } from "../../../src/components/jsonFile/index.js";
+import path from "node:path";
+import { readStartupDnsGuide, readStoredDnsGuide } from "../../../src/components/web/utils/startupDnsGuide.js";
 import { createTemporaryStorage, removeTemporaryStorage } from "../../support/temporaryStorage.js";
 import { testConfiguration } from "../../support/testConfiguration.js";
 import { requestJson, startWebConsole } from "../../support/webConsole.js";
@@ -36,6 +38,7 @@ describe("startup DNS guide", { concurrency: 1 }, () => {
       const namedGuide = await readStoredDnsGuide({ ...configuration, publicHostname: "ignored.example" });
       assert.match(namedGuide?.zoneFile || "", /mail\.acme\.test\.\t300\tIN\tA\t1\.2\.3\.4/);
       assert.match(namedGuide?.zoneFile || "", /IN\tMX\t10 mail\.acme\.test\./);
+      assert.equal((await readStartupDnsGuide(configuration))?.domain, "acme.test");
     } finally {
       await removeTemporaryStorage(storageDirectory);
     }
@@ -69,6 +72,31 @@ describe("startup DNS guide", { concurrency: 1 }, () => {
     } finally {
       console.log = originalLog;
       await consoleServer.stop();
+    }
+  });
+
+  it("keeps running when the saved DNS guide cannot be read", async () => {
+    const storageDirectory = await createTemporaryStorage();
+    const configuration = testConfiguration(storageDirectory);
+    const errors: string[] = [];
+    const originalError = console.error;
+    console.error = (...parts: unknown[]) => {
+      errors.push(parts.map((part) => String(part)).join(" "));
+    };
+    try {
+      await new OrganizationRepository(storageDirectory).create({
+        domain: "acme.test",
+        displayName: "Acme",
+        requiredDomain: "acme.test",
+        publicAddress: "1.2.3.4",
+        administratorAddress: "ada@acme.test"
+      });
+      await writeJson(path.join(storageDirectory, "domain-key.json"), { privateKey: "" });
+      assert.equal(await readStartupDnsGuide(configuration), null);
+      assert.match(errors.join("\n"), /The DNS guide could not be read/);
+    } finally {
+      console.error = originalError;
+      await removeTemporaryStorage(storageDirectory);
     }
   });
 });

@@ -2,7 +2,7 @@ import type { Server } from "node:net";
 import { parentPort, workerData, type MessagePort } from "node:worker_threads";
 import { createWebServer, startWebServer, type ListenerStatus } from "../web/index.js";
 import { ImapServer } from "../imap/index.js";
-import { describeListenError } from "../protocol/utils/listen.js";
+import { describeListenError, listenWhenPortIsFree } from "../protocol/utils/listen.js";
 import { Pop3Server } from "../pop3/index.js";
 import { SmtpServer } from "../smtp/index.js";
 import { describeCertificateMaterial, prepareCertificateMaterial, storeCertificateMaterial } from "../certificate/index.js";
@@ -36,6 +36,7 @@ let nextRequestId = 1;
 const servers: Server[] = [];
 const listenerStatus: ListenerStatus[] = [];
 let queueTimer: ReturnType<typeof setInterval> | undefined;
+let stopping = false;
 let resolveListeners = (): void => undefined;
 const listenersApplied = new Promise<void>((resolve) => {
   resolveListeners = resolve;
@@ -62,11 +63,35 @@ async function remember(
     servers.push(started.server);
     listenerStatus.push({ ...description, port: started.port, started: true, detail: "" });
   } catch (error) {
-    listenerStatus.push({ ...description, started: false, detail: describeListenError(error as NodeJS.ErrnoException) });
+    const status: ListenerStatus = { ...description, started: false, detail: describeListenError(error as NodeJS.ErrnoException) };
+    listenerStatus.push(status);
+    if ((error as NodeJS.ErrnoException).code === "EADDRINUSE") {
+      void retryListener(status, starter);
+    }
+  }
+}
+
+async function retryListener(
+  status: ListenerStatus,
+  starter: () => Promise<{ server: Server; port: number }>
+): Promise<void> {
+  try {
+    const started = await listenWhenPortIsFree(starter, () => stopping);
+    servers.push(started.server);
+    status.port = started.port;
+    status.started = true;
+    status.detail = "";
+    thread.postMessage({ kind: WorkerMessageKind.Listening, service, listeners: listenerStatus });
+  } catch (error) {
+    if (!stopping) {
+      status.detail = describeListenError(error as NodeJS.ErrnoException);
+      console.error(`${service} listener on port ${status.port} did not start: ${status.detail}`);
+    }
   }
 }
 
 async function closeServers(): Promise<void> {
+  stopping = true;
   if (queueTimer) {
     clearInterval(queueTimer);
   }
@@ -176,9 +201,16 @@ async function startService(runtime: MailRuntime): Promise<void> {
     return;
   }
   if (service === ServiceName.Queue) {
+    let queuePassActive = false;
     queueTimer = setInterval(() => {
+      if (queuePassActive) {
+        return;
+      }
+      queuePassActive = true;
       runtime.deliveryService.processQueue().catch((error: Error) => {
         console.error(`Outbound queue failed: ${error.message}`);
+      }).finally(() => {
+        queuePassActive = false;
       });
     }, 30 * 1000);
   }

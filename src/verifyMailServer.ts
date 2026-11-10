@@ -1,5 +1,6 @@
 import net from "node:net";
 import tls from "node:tls";
+import { generateAuthoritySignedCertificate } from "./components/certificate/utils/selfSignedCertificate.js";
 import os from "node:os";
 import path from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -28,12 +29,20 @@ const configuration = {
 
 let sinkPort = 0;
 const sinkMessages: string[] = [];
+const sinkCertificate = generateAuthoritySignedCertificate(["127.0.0.1"]);
+const sinkSecureContext = tls.createSecureContext({
+  cert: `${sinkCertificate.certificate}\n${sinkCertificate.intermediateCertificate}`,
+  key: sinkCertificate.privateKey
+});
 const sink = net.createServer((socket) => {
-  socket.write("220 sink.example.test ready\r\n");
+  let current: net.Socket = socket;
   let buffer = "";
   let collecting = false;
-  const lines: string[] = [];
-  socket.on("data", (chunk) => {
+  let secured = false;
+  const write = (line: string) => {
+    current.write(line);
+  };
+  const onData = (chunk: Buffer) => {
     buffer += chunk.toString("utf8");
     while (true) {
       if (collecting) {
@@ -44,7 +53,7 @@ const sink = net.createServer((socket) => {
         sinkMessages.push(buffer.slice(0, end));
         buffer = buffer.slice(end + 5);
         collecting = false;
-        socket.write("250 accepted\r\n");
+        write("250 accepted\r\n");
         continue;
       }
       const splitAt = buffer.indexOf("\r\n");
@@ -53,23 +62,31 @@ const sink = net.createServer((socket) => {
       }
       const line = buffer.slice(0, splitAt);
       buffer = buffer.slice(splitAt + 2);
-      lines.push(line);
       const command = line.split(" ")[0].toUpperCase();
       if (command === "EHLO" || command === "HELO") {
-        socket.write("250 sink.example.test\r\n");
-      } else if (command === "STARTTLS") {
-        socket.write("454 TLS is not available on the test sink\r\n");
+        write(secured ? "250 sink.example.test\r\n" : "250-sink.example.test\r\n250 STARTTLS\r\n");
+      } else if (command === "STARTTLS" && !secured) {
+        write("220 Ready to start TLS\r\n");
+        socket.removeListener("data", onData);
+        const secureSocket = new tls.TLSSocket(socket, { isServer: true, secureContext: sinkSecureContext });
+        current = secureSocket;
+        secured = true;
+        buffer = "";
+        secureSocket.on("data", onData);
+        secureSocket.on("error", () => secureSocket.destroy());
       } else if (command === "DATA") {
-        socket.write("354 continue\r\n");
+        write("354 continue\r\n");
         collecting = true;
       } else if (command === "QUIT") {
-        socket.write("221 bye\r\n");
-        socket.end();
+        write("221 bye\r\n");
+        current.end();
       } else {
-        socket.write("250 ok\r\n");
+        write("250 ok\r\n");
       }
     }
-  });
+  };
+  write("220 sink.example.test ready\r\n");
+  socket.on("data", onData);
 });
 await new Promise<void>((resolve) => sink.listen(0, "127.0.0.1", () => resolve()));
 sinkPort = (sink.address() as net.AddressInfo).port;
@@ -78,7 +95,7 @@ const running = await startEmailServer({
   configuration,
   mailExchangeResolver: {
     async resolve() {
-      return [{ host: "127.0.0.1", port: sinkPort }];
+      return [{ host: "127.0.0.1", port: sinkPort, trustedCertificate: sinkCertificate.rootCertificate }];
     }
   }
 });

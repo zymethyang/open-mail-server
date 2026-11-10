@@ -65,13 +65,11 @@ class SmtpConversation {
     });
   }
 
-  upgrade(host: string): Promise<void> {
+  upgrade(host: string, trustedCertificate = ""): Promise<void> {
     return new Promise((resolve, reject) => {
       const secureSocket = tls.connect({
         socket: this.socket,
-        servername: host,
-        rejectUnauthorized: true,
-        minVersion: "TLSv1.2"
+        ...tlsSecurity(host, trustedCertificate)
       });
       const fail = (error: Error) => {
         secureSocket.destroy();
@@ -136,6 +134,20 @@ class SmtpConversation {
   }
 }
 
+function certificateServerName(host: string): string | undefined {
+  return net.isIP(host) ? undefined : host;
+}
+
+function tlsSecurity(host: string, trustedCertificate: string): tls.ConnectionOptions {
+  return {
+    servername: certificateServerName(host),
+    ca: trustedCertificate || undefined,
+    rejectUnauthorized: true,
+    minVersion: "TLSv1.2",
+    checkServerIdentity: (_hostname, certificate) => tls.checkServerIdentity(host, certificate)
+  };
+}
+
 function connect(exchange: MailExchange): Promise<net.Socket> {
   return openSocket(exchange, net.connect({ host: exchange.host, port: exchange.port }), false);
 }
@@ -146,9 +158,7 @@ function connectTransportSecurity(exchange: MailExchange): Promise<tls.TLSSocket
     tls.connect({
       host: exchange.host,
       port: exchange.port,
-      servername: exchange.host,
-      rejectUnauthorized: true,
-      minVersion: "TLSv1.2"
+      ...tlsSecurity(exchange.host, exchange.trustedCertificate || "")
     }),
     true
   );
@@ -189,12 +199,12 @@ export async function deliverToExchange(exchange: MailExchange, delivery: Outbou
     if (!secured && (!relay || relay.security === RelaySecurity.StartTls) && /STARTTLS/i.test(features)) {
       await conversation.writeLine("STARTTLS");
       await expect(conversation, 200, 299, "STARTTLS");
-      await conversation.upgrade(exchange.host);
+      await conversation.upgrade(exchange.host, exchange.trustedCertificate || "");
       secured = true;
       await greet(conversation, delivery.serverDomain);
     }
-    if (relay?.security === RelaySecurity.StartTls && !secured) {
-      throw new Error("The relay did not offer STARTTLS");
+    if (!secured && relay?.security !== RelaySecurity.Plain) {
+      throw new Error("The mail server did not offer TLS");
     }
     if (relay?.username) {
       const token = Buffer.from(`\u0000${relay.username}\u0000${relay.password}`, "utf8").toString("base64");

@@ -1,6 +1,7 @@
 import os from "node:os";
 import type { Configuration } from "../configuration/index.js";
 import { DeliveryService } from "../delivery/index.js";
+import { dnsMailAuthenticationLookup } from "../mailAuthentication/dnsLookup.js";
 import type { MailExchangeResolver } from "../mailExchange/interfaces/mailExchange.js";
 import { MailboxEvents } from "../mailboxEvents/index.js";
 import { ensureSelfSignedCertificate, type ServerCertificate } from "../certificate/index.js";
@@ -78,7 +79,8 @@ export async function createMailRuntime(input: {
     serverDomain: signingDomain,
     announceName: serverName,
     readRelay: () => settingsRepository.read().then((settings) => settings.relay),
-    signOutgoingMessage: createOutgoingSigner(configuration.storageDirectory, signingDomain)
+    signOutgoingMessage: createOutgoingSigner(configuration.storageDirectory, signingDomain),
+    mailAuthenticationLookup: dnsMailAuthenticationLookup()
   });
   return {
     configuration,

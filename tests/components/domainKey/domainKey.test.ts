@@ -68,7 +68,7 @@ describe("domain key", { concurrency: 1 }, () => {
         activityLogger: new ActivityLogger(storageDirectory),
         mailExchangeResolver: {
           async resolve() {
-            return [{ host: "127.0.0.1", port: sink.port }];
+            return [{ host: "127.0.0.1", port: sink.port, trustedCertificate: sink.trustedCertificate }];
           }
         },
         serverDomain: async () => "acme.test",

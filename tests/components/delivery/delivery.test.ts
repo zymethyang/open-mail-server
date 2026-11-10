@@ -9,11 +9,15 @@ import { ActivityLogger } from "../../../src/components/activity/index.js";
 import { DeliveryService } from "../../../src/components/delivery/index.js";
 import type { DeliveryService as DeliveryServiceContract } from "../../../src/components/delivery/interfaces/delivery.js";
 import { readJson, writeJson } from "../../../src/components/jsonFile/index.js";
+import type { MailAuthenticationLookup } from "../../../src/components/mailAuthentication/interfaces/mailAuthenticationLookup.js";
 import type { MailExchangeResolver } from "../../../src/components/mailExchange/interfaces/mailExchange.js";
 import { MailboxEvents } from "../../../src/components/mailboxEvents/index.js";
 import { MessageRepository } from "../../../src/components/message/index.js";
 import { MailProtocol } from "../../../src/components/protocol/enums/mailProtocol.js";
+import { generateKeyPairSync } from "node:crypto";
 import { AccountRepository } from "../../../src/components/account/index.js";
+import { signWithDomainKey } from "../../../src/components/domainKey/index.js";
+import { openSecureStorage } from "../../../src/components/secureStorage/index.js";
 import { RelaySecurity } from "../../../src/components/settings/enums/relaySecurity.js";
 import type { MailRelaySettings } from "../../../src/components/settings/interfaces/settings.js";
 import { createTemporaryStorage, removeTemporaryStorage } from "../../support/temporaryStorage.js";
@@ -32,7 +36,7 @@ describe("delivery service", { concurrency: 1 }, () => {
     try {
       const local = await openDelivery(storageDirectory, {
         async resolve() {
-          return [{ host: "127.0.0.1", port: sink.port }];
+          return [{ host: "127.0.0.1", port: sink.port, trustedCertificate: sink.trustedCertificate }];
         }
       });
       await local.accountRepository.createAccount({
@@ -133,7 +137,7 @@ describe("delivery service", { concurrency: 1 }, () => {
           if (fail) {
             throw new Error("still down");
           }
-          return [{ host: "127.0.0.1", port: sink.port }];
+          return [{ host: "127.0.0.1", port: sink.port, trustedCertificate: sink.trustedCertificate }];
         }
       });
       await opened.accountRepository.createAccount({
@@ -193,7 +197,7 @@ describe("delivery service", { concurrency: 1 }, () => {
           if (domain === "blocked.example") {
             throw new Error("still down");
           }
-          return [{ host: "127.0.0.1", port: sink.port }];
+          return [{ host: "127.0.0.1", port: sink.port, trustedCertificate: sink.trustedCertificate }];
         }
       });
       await opened.accountRepository.createAccount({
@@ -259,7 +263,7 @@ describe("delivery service", { concurrency: 1 }, () => {
           if (domain === "blocked.example") {
             throw new Error("still down");
           }
-          return [{ host: "127.0.0.1", port: sink.port }];
+          return [{ host: "127.0.0.1", port: sink.port, trustedCertificate: sink.trustedCertificate }];
         }
       });
       await opened.accountRepository.createAccount({
@@ -415,7 +419,7 @@ describe("delivery service", { concurrency: 1 }, () => {
     try {
       const opened = await openDelivery(storageDirectory, {
         async resolve() {
-          return [{ host: "127.0.0.1", port: sink.port }];
+          return [{ host: "127.0.0.1", port: sink.port, trustedCertificate: sink.trustedCertificate }];
         }
       });
       await opened.accountRepository.createAccount({
@@ -465,6 +469,195 @@ describe("delivery service", { concurrency: 1 }, () => {
       await removeTemporaryStorage(storageDirectory);
     }
   });
+
+  it("sends a queued message once when two passes overlap and waits until it is due", async () => {
+    const storageDirectory = await createTemporaryStorage();
+    const sink = await startSmtpSink();
+    try {
+      await openSecureStorage(storageDirectory);
+      const resolver: MailExchangeResolver = {
+        async resolve() {
+          return [{ host: "127.0.0.1", port: sink.port, trustedCertificate: sink.trustedCertificate }];
+        }
+      };
+      const first = await openDelivery(storageDirectory, resolver);
+      const second = await openDelivery(storageDirectory, resolver);
+      await first.accountRepository.createAccount({
+        address: "ada@acme.test",
+        displayName: "Ada Admin",
+        password: "correct-horse",
+        role: AccountRole.Administrator,
+        domain: "acme.test"
+      });
+      const raw = Buffer.from("From: ada@acme.test\r\nTo: person@example.test\r\nSubject: Once\r\n\r\nOne copy\r\n");
+      await writeJson(path.join(storageDirectory, "outbound-queue", "queued-once.json"), {
+        identifier: "queued-once",
+        serverDomain: "acme.test",
+        senderAddress: "ada@acme.test",
+        authenticatedAddress: "ada@acme.test",
+        recipientAddresses: ["person@example.test"],
+        rawEncoded: raw.toString("base64"),
+        attempts: 0,
+        nextAttemptAt: new Date(Date.now() - 1000).toISOString(),
+        lastError: ""
+      });
+      await Promise.all([first.deliveryService.processQueue(), second.deliveryService.processQueue()]);
+      assert.equal(sink.messages.length, 1);
+      assert.equal(sink.messages[0].includes("One copy"), true);
+      assert.equal(await first.deliveryService.queuedCount(), 0);
+
+      await writeJson(path.join(storageDirectory, "outbound-queue", "queued-later.json"), {
+        identifier: "queued-later",
+        serverDomain: "acme.test",
+        senderAddress: "ada@acme.test",
+        authenticatedAddress: "ada@acme.test",
+        recipientAddresses: ["person@example.test"],
+        rawEncoded: raw.toString("base64"),
+        attempts: 1,
+        nextAttemptAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        lastError: "waiting"
+      });
+      await first.deliveryService.processQueue();
+      assert.equal(sink.messages.length, 1);
+      assert.equal(await first.deliveryService.queuedCount(), 1);
+      const resent = await first.deliveryService.resendFailedEmail(["queued-later"]);
+      assert.deepEqual(resent.sent, ["queued-later"]);
+      assert.equal(sink.messages.length, 2);
+    } finally {
+      await sink.stop();
+      await removeTemporaryStorage(storageDirectory);
+    }
+  });
+
+  it("queues direct delivery when the other mail server does not offer TLS", async () => {
+    const storageDirectory = await createTemporaryStorage();
+    const sink = await startSmtpSink({ offerTransportSecurity: false });
+    try {
+      const opened = await openDelivery(storageDirectory, {
+        async resolve() {
+          return [{ host: "127.0.0.1", port: sink.port, trustedCertificate: sink.trustedCertificate }];
+        }
+      });
+      await opened.accountRepository.createAccount({
+        address: "ada@acme.test",
+        displayName: "Ada Admin",
+        password: "correct-horse",
+        role: AccountRole.Administrator,
+        domain: "acme.test"
+      });
+      const result = await opened.deliveryService.deliver({
+        ...deliveryRequest("ada@acme.test", ["person@example.test"], "Needs TLS"),
+        authenticatedAddress: "ada@acme.test"
+      });
+      assert.deepEqual(result.queuedRecipients, ["person@example.test"]);
+      assert.match(result.warning, /did not offer TLS/);
+      assert.equal(sink.messages.length, 0);
+    } finally {
+      await sink.stop();
+      await removeTemporaryStorage(storageDirectory);
+    }
+  });
+
+  it("follows the sender DMARC policy for mail that is not signed in", async () => {
+    const storageDirectory = await createTemporaryStorage();
+    const sink = await startSmtpSink();
+    const generated = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const privateKey = generated.privateKey.export({ type: "pkcs8", format: "pem" });
+    if (typeof privateKey !== "string") {
+      throw new Error("The test key could not be created");
+    }
+    const publicKeyBody = generated.publicKey.export({ type: "spki", format: "der" }).toString("base64");
+    const lookup: MailAuthenticationLookup = {
+      async resolveText(name) {
+        if (name === "_dmarc.reject.test") {
+          return ["v=DMARC1; p=reject"];
+        }
+        if (name === "_dmarc.quarantine.test") {
+          return ["v=DMARC1; p=quarantine"];
+        }
+        if (name === "_dmarc.none.test") {
+          return ["v=DMARC1; p=none"];
+        }
+        if (name === "_dmarc.signed.test" || name === "_dmarc.spf.test") {
+          return ["v=DMARC1; p=reject"];
+        }
+        if (name === "mail._domainkey.signed.test") {
+          return [`v=DKIM1; k=rsa; p=${publicKeyBody}`];
+        }
+        if (name === "spf.test") {
+          return ["v=spf1 ip4:203.0.113.8 -all"];
+        }
+        if (name.includes("temperror.test")) {
+          throw Object.assign(new Error("timed out"), { code: "ETIMEOUT" });
+        }
+        return [];
+      },
+      async resolveAddresses() {
+        return [];
+      },
+      async resolveMailExchanges() {
+        return [];
+      }
+    };
+    try {
+      const opened = await openDelivery(
+        storageDirectory,
+        {
+          async resolve() {
+            return [{ host: "127.0.0.1", port: sink.port, trustedCertificate: sink.trustedCertificate }];
+          }
+        },
+        "acme.test",
+        undefined,
+        lookup
+      );
+      await opened.accountRepository.createAccount({
+        address: "bea@acme.test",
+        displayName: "Bea Member",
+        password: "member-horse",
+        role: AccountRole.Member,
+        domain: "acme.test"
+      });
+      await assert.rejects(
+        () => opened.deliveryService.deliver(deliveryRequest("ada@reject.test", ["bea@acme.test"], "Rejected")),
+        (error: unknown) => statusCodeOf(error) === 550 && (error as Error).message.includes("Rejected by the sender DMARC policy")
+      );
+      assert.equal((await opened.messageRepository.listMessages("bea@acme.test", "inbox")).length, 0);
+
+      const quarantined = await opened.deliveryService.deliver(deliveryRequest("ada@quarantine.test", ["bea@acme.test"], "Held"));
+      assert.deepEqual(quarantined.localRecipients, ["bea@acme.test"]);
+      assert.equal((await opened.messageRepository.listMessages("bea@acme.test", "junk")).length, 1);
+      assert.equal((await opened.messageRepository.listMessages("bea@acme.test", "inbox")).length, 0);
+
+      await opened.deliveryService.deliver(deliveryRequest("ada@none.test", ["bea@acme.test"], "Published none"));
+      await opened.deliveryService.deliver({
+        ...deliveryRequest("ada@spf.test", ["bea@acme.test"], "Aligned sender"),
+        remoteAddress: "203.0.113.8"
+      });
+      const signed = signWithDomainKey(
+        Buffer.from("From: ada@signed.test\r\nTo: bea@acme.test\r\nSubject: Signed\r\n\r\nSigned body\r\n"),
+        "signed.test",
+        privateKey
+      );
+      await opened.deliveryService.deliver({
+        fromAddress: "ada@signed.test",
+        recipientAddresses: ["bea@acme.test"],
+        rawBuffer: signed,
+        authenticatedAddress: "",
+        remoteAddress: "198.51.100.20",
+        protocol: MailProtocol.Smtp
+      });
+      await opened.deliveryService.deliver(deliveryRequest("ada@temperror.test", ["bea@acme.test"], "Lookup failed open"));
+      const inbox = await opened.messageRepository.listMessages("bea@acme.test", "inbox");
+      assert.equal(inbox.filter((message) => message.text.includes("Published none")).length, 1);
+      assert.equal(inbox.filter((message) => message.text.includes("Aligned sender")).length, 1);
+      assert.equal(inbox.filter((message) => message.text.includes("Signed body")).length, 1);
+      assert.equal(inbox.filter((message) => message.text.includes("Lookup failed open")).length, 1);
+    } finally {
+      await sink.stop();
+      await removeTemporaryStorage(storageDirectory);
+    }
+  });
 });
 
 function queuedFailure(identifier: string, recipient: string, subject: string, nextAttemptAt = "", attempts = 1) {
@@ -497,7 +690,8 @@ async function openDelivery(
   storageDirectory: string,
   mailExchangeResolver: MailExchangeResolver,
   domain = "acme.test",
-  relay?: MailRelaySettings
+  relay?: MailRelaySettings,
+  mailAuthenticationLookup?: MailAuthenticationLookup
 ) {
   const accountRepository = new AccountRepository(storageDirectory);
   const messageRepository = new MessageRepository(storageDirectory, new MailboxEvents());
@@ -518,7 +712,8 @@ async function openDelivery(
         username: "",
         password: "",
         security: RelaySecurity.StartTls
-      }
+      },
+    mailAuthenticationLookup
   });
   return { accountRepository, messageRepository, activityLogger, deliveryService };
 }

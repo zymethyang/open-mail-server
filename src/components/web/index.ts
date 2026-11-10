@@ -25,6 +25,7 @@ import { checkPublicPorts } from "../publicPort/index.js";
 import type { OrganizationRecord } from "../organization/interfaces/organizationRecord.js";
 import { openDomainKey } from "../domainKey/index.js";
 import { createDnsGuide, formatDnsGuideForTerminal } from "./utils/dnsGuide.js";
+import { consoleAllowsVisitor } from "./utils/consoleVisitor.js";
 import { displayedImageType } from "./utils/displayedImageType.js";
 import { createMessageIdentifier, createRawMessage, parseRawMessage, sanitizeMessageHtml, type OutboundAttachment } from "../mime/index.js";
 import { createSnippet } from "../mime/index.js";
@@ -949,6 +950,10 @@ export function createWebServer(dependencies: {
       "default-src 'self'; connect-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'self'; frame-ancestors 'none'"
     );
     try {
+      const companyAccountExists = await dependencies.accountRepository.hasAccounts();
+      if (!consoleAllowsVisitor(request.socket.remoteAddress || "", companyAccountExists)) {
+        throw new HttpError(403, "Create the company from this machine before opening the console from another computer");
+      }
       const host = request.headers.host || `127.0.0.1:${dependencies.configuration.webPort}`;
       const url = new URL(request.url || "/", `http://${host}`);
       if (request.method !== "GET" && request.method !== "HEAD") {

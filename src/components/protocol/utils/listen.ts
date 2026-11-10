@@ -23,6 +23,26 @@ export function listen(server: net.Server | tls.Server, port: number, host: stri
   });
 }
 
+export async function listenWhenPortIsFree<T>(
+  start: () => Promise<T>,
+  stopping: () => boolean,
+  wait: (milliseconds: number) => Promise<void> = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
+): Promise<T> {
+  for (;;) {
+    if (stopping()) {
+      throw Object.assign(new Error("The listener stopped"), { code: "STOPPING" });
+    }
+    try {
+      return await start();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE") {
+        throw error;
+      }
+      await wait(300);
+    }
+  }
+}
+
 export function describeListenError(error: NodeJS.ErrnoException): string {
   if (error.code === "EADDRINUSE") {
     return "port is already in use";

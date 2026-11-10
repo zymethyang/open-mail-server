@@ -67,7 +67,7 @@ export async function requestJson(
   return { status: response.status, payload, cookieHeader: cookieHeader(lines) };
 }
 
-export async function startWebConsole(options: { configuredDomain?: string; serverName?: string; mailExchangeResolver?: (sink: SmtpSink) => MailExchangeResolver } = {}): Promise<RunningWebConsole> {
+export async function startWebConsole(options: { configuredDomain?: string; serverName?: string; listenHost?: string; mailExchangeResolver?: (sink: SmtpSink) => MailExchangeResolver } = {}): Promise<RunningWebConsole> {
   const storageDirectory = await createTemporaryStorage();
   const sink = await startSmtpSink();
   const configuration = testConfiguration(storageDirectory);
@@ -94,7 +94,7 @@ export async function startWebConsole(options: { configuredDomain?: string; serv
       ? options.mailExchangeResolver(sink)
       : {
           async resolve() {
-            return [{ host: "127.0.0.1", port: sink.port }];
+            return [{ host: "127.0.0.1", port: sink.port, trustedCertificate: sink.trustedCertificate }];
           }
         },
     serverDomain: signingDomain,
@@ -125,7 +125,7 @@ export async function startWebConsole(options: { configuredDomain?: string; serv
       return description;
     }
   });
-  const port = await startWebServer(server, 0, "127.0.0.1");
+  const port = await startWebServer(server, 0, options.listenHost || "127.0.0.1");
   return {
     baseUrl: `http://127.0.0.1:${port}`,
     storageDirectory,
@@ -141,6 +141,8 @@ export async function startWebConsole(options: { configuredDomain?: string; serv
 }
 
 function closeServer(server: Server): Promise<void> {
+  const closingServer = server as Server & { closeIdleConnections?: () => void };
+  closingServer.closeIdleConnections?.();
   return new Promise((resolve, reject) => {
     server.close((error) => {
       if (error) {
