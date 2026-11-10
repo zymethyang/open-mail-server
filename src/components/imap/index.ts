@@ -2,24 +2,27 @@ import net from "node:net";
 import tls from "node:tls";
 import type { Configuration } from "../configuration/index.js";
 import { oneLine } from "../text/index.js";
-import type { MailFolder, MessageRecord } from "../message/interfaces/mailTypes.js";
 import { normalizeAddress } from "../text/index.js";
 import type { MailboxEvents } from "../mailboxEvents/interfaces/mailboxEvents.js";
+import { verifyProtocolSignIn } from "../account/utils/protocolSignIn.js";
 import { createStoredMessage, parseRawMessage, quoteImap } from "../mime/index.js";
-import type { AccountRepository } from "../account/index.js";
-import type { ActivityLogger } from "../activity/index.js";
-import type { MessageRepository } from "../message/index.js";
+import type { AccountRepository } from "../account/interfaces/accountRepository.js";
+import type { ActivityLogger } from "../activity/interfaces/activityLogger.js";
+import type { MessageRepository } from "../message/interfaces/messageRepository.js";
 import type { PublicAccount } from "../account/interfaces/accountRecord.js";
 import type { ServerCertificate } from "../certificate/index.js";
 import type { SignInGuard } from "../signIn/interfaces/signInGuard.js";
 import { ActivityAction } from "../activity/enums/activityAction.js";
 import { ActivityResult } from "../activity/enums/activityResult.js";
 import { MailProtocol } from "../protocol/enums/mailProtocol.js";
+import { FlagStoreMode } from "./enums/flagStoreMode.js";
 import { ImapCommand } from "./enums/imapCommand.js";
+import type { SelectedFolder } from "./interfaces/selectedFolder.js";
 import { listen } from "../protocol/utils/listen.js";
 import { createProtocolReader } from "../protocol/index.js";
 import { secureOptions, upgradeToTls } from "../protocol/utils/transportSecurity.js";
 import {
+  appendDetails,
   applyFlags,
   compileSearch,
   expandAttributes,
@@ -36,17 +39,13 @@ import {
 } from "./utils/imapMailbox.js";
 
 function capabilityText(secure: boolean): string {
-  const parts = ["IMAP4rev1", "LITERAL+", "IDLE", "MOVE", "NAMESPACE", "UNSELECT", "SPECIAL-USE", "ID", "AUTH=PLAIN", "LOGIN"];
-  if (!secure) {
-    parts.push(ImapCommand.StartTls);
+  const parts = ["IMAP4rev1", "LITERAL+", "IDLE", "MOVE", "NAMESPACE", "UNSELECT", "SPECIAL-USE", "ID"];
+  if (secure) {
+    parts.push("AUTH=PLAIN", "LOGIN");
+  } else {
+    parts.push("LOGINDISABLED", ImapCommand.StartTls);
   }
   return parts.join(" ");
-}
-
-interface SelectedFolder {
-  folder: MailFolder;
-  readOnly: boolean;
-  messages: MessageRecord[];
 }
 
 export class ImapServer {
@@ -145,15 +144,20 @@ export class ImapServer {
     }
 
     async function signIn(tag: string, username: string, password: string): Promise<void> {
+      if (!session.secure) {
+        reader.send(`${tag} NO Sign in requires TLS\r\n`);
+        return;
+      }
       const key = `sign-in:${normalizeAddress(username) || username}`;
       const blocked = input.signInGuard.rejectionMessage(key);
       if (blocked) {
         reader.send(`${tag} NO ${blocked}\r\n`);
         return;
       }
-      const account = await input.accountRepository.verifyCredentials(username, password);
-      if (!account) {
+      const result = await verifyProtocolSignIn(input.accountRepository, username, password);
+      if (!result.account) {
         input.signInGuard.recordFailure(key);
+        const detail = "Invalid credentials";
         await input.activityLogger.record({
           protocol: MailProtocol.Imap,
           action: ActivityAction.SignIn,
@@ -164,11 +168,12 @@ export class ImapServer {
           subject: "",
           byteCount: 0,
           result: ActivityResult.Rejected,
-          detail: "invalid credentials"
+          detail
         });
-        reader.send(`${tag} NO Invalid credentials\r\n`);
+        reader.send(`${tag} NO ${detail}\r\n`);
         return;
       }
+      const account = result.account;
       input.signInGuard.recordSuccess(key);
       session.account = account;
       await input.messageRepository.ensureMailbox(account.address);
@@ -346,10 +351,13 @@ export class ImapServer {
         reader.send(`${tag} NO Unknown folder\r\n`);
         return;
       }
-      const flagToken = tokens.find((token) => Array.isArray(token));
+      const details = appendDetails(tokens);
       const parsed = parseRawMessage(literal);
       const stored = createStoredMessage(parsed, literal, session.account.address);
-      const changes = applyFlags(stored, "add", Array.isArray(flagToken) ? flagToken.map(String) : []);
+      if (details.receivedAt) {
+        stored.date = details.receivedAt;
+      }
+      const changes = applyFlags(stored, FlagStoreMode.Add, details.flagNames);
       const record = await input.messageRepository.appendMessage(session.account.address, folder.storageName, { ...stored, ...changes });
       const state = await input.messageRepository.mailboxState(session.account.address);
       reader.send(`${tag} OK [APPENDUID ${state.validity} ${record.uniqueIdentifier}] APPEND completed\r\n`);

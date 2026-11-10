@@ -1,6 +1,5 @@
 import { ApiEndpoint } from "../../enums/apiEndpoint.js";
 import { requestJson } from "../../http/jsonClient.js";
-import type { SessionAccount } from "../../interfaces/models.js";
 import type { Page } from "../../interfaces/page.js";
 import { applicationState } from "../../state/applicationState.js";
 import { element, optionalElement } from "../../utils/element.js";
@@ -9,15 +8,7 @@ import { errorMessage } from "../../utils/errorMessage.js";
 import { iconLabel } from "../../utils/buttonIcon.js";
 import { clearFormErrors, replaceMainContent, showFormError } from "../../utils/formFeedback.js";
 import { currentRouteGeneration } from "../../state/routeGeneration.js";
-
-interface AccountResponse {
-  account: SessionAccount;
-}
-
-interface AuthenticatorSetup {
-  image: string;
-  secret: string;
-}
+import type { AccountResponse, AuthenticatorSetup } from "../../interfaces/sessionResponse.js";
 
 function bindAuthenticator(): void {
   const start = optionalElement<HTMLButtonElement>("#authenticator-start");

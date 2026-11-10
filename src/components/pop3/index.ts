@@ -3,9 +3,10 @@ import tls from "node:tls";
 import type { Configuration } from "../configuration/index.js";
 import { normalizeAddress } from "../text/index.js";
 import { rawBufferFromMessage, splitHeaderAndBody } from "../mime/index.js";
-import type { AccountRepository } from "../account/index.js";
-import type { ActivityLogger } from "../activity/index.js";
-import type { MessageRepository } from "../message/index.js";
+import { verifyProtocolSignIn } from "../account/utils/protocolSignIn.js";
+import type { AccountRepository } from "../account/interfaces/accountRepository.js";
+import type { ActivityLogger } from "../activity/interfaces/activityLogger.js";
+import type { MessageRepository } from "../message/interfaces/messageRepository.js";
 import type { MessageRecord } from "../message/interfaces/mailTypes.js";
 import type { ServerCertificate } from "../certificate/index.js";
 import type { SignInGuard } from "../signIn/interfaces/signInGuard.js";
@@ -88,9 +89,14 @@ export class Pop3Server {
         reader.send(`-ERR ${blocked}\r\n`);
         return;
       }
-      const account = await input.accountRepository.verifyCredentials(username, password);
-      if (!account) {
+      if (!session.secure) {
+        reader.send("-ERR Sign in requires TLS\r\n");
+        return;
+      }
+      const result = await verifyProtocolSignIn(input.accountRepository, username, password);
+      if (!result.account) {
         input.signInGuard.recordFailure(key);
+        const detail = "Invalid credentials";
         await input.activityLogger.record({
           protocol: MailProtocol.Pop3,
           action: ActivityAction.SignIn,
@@ -101,11 +107,12 @@ export class Pop3Server {
           subject: "",
           byteCount: 0,
           result: ActivityResult.Rejected,
-          detail: "invalid credentials"
+          detail
         });
-        reader.send("-ERR Invalid credentials\r\n");
+        reader.send(`-ERR ${detail}\r\n`);
         return;
       }
+      const account = result.account;
       input.signInGuard.recordSuccess(key);
       session.accountAddress = account.address;
       await input.messageRepository.ensureMailbox(account.address);
@@ -137,8 +144,10 @@ export class Pop3Server {
       const argument = spaceIndex === -1 ? "" : line.slice(spaceIndex + 1);
 
       if (command === Pop3Command.Capability) {
-        const lines = ["+OK Capability list follows", Pop3Command.User, Pop3Command.UniqueIdentifierList, Pop3Command.Top, "SASL PLAIN LOGIN", "IMPLEMENTATION Open Mail Server"];
-        if (!session.secure) {
+        const lines = ["+OK Capability list follows", Pop3Command.UniqueIdentifierList, Pop3Command.Top, "IMPLEMENTATION Open Mail Server"];
+        if (session.secure) {
+          lines.push(Pop3Command.User, "SASL PLAIN LOGIN");
+        } else {
           lines.push(Pop3Command.StartTls);
         }
         reader.send(`${lines.join("\r\n")}\r\n.\r\n`);
@@ -156,6 +165,10 @@ export class Pop3Server {
         return;
       }
       if (command === Pop3Command.User) {
+        if (!session.secure) {
+          reader.send("-ERR Sign in requires TLS\r\n");
+          return;
+        }
         if (session.accountAddress) {
           reader.send("-ERR Already signed in\r\n");
           return;

@@ -1,15 +1,6 @@
-export interface FailedEmailSearchFields {
-  senderAddress: string;
-  recipientAddresses: string[];
-  subject: string;
-  lastError: string;
-}
+import type { FailedEmailNoticeCounts, FailedEmailSearchFields } from "../../interfaces/failedEmailPresentation.js";
 
-export interface FailedEmailNoticeCounts {
-  sent: unknown[];
-  givenUp: unknown[];
-  stillWaiting: unknown[];
-}
+export type { FailedEmailNoticeCounts, FailedEmailSearchFields };
 
 export function visibleFailedEmail<MessageType extends FailedEmailSearchFields>(messages: MessageType[], query: string): MessageType[] {
   const needle = query.trim().toLowerCase();

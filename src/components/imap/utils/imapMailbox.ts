@@ -7,6 +7,7 @@ import {
   rawBufferFromMessage,
   splitHeaderAndBody
 } from "../../mime/index.js";
+import { FlagStoreMode } from "../enums/flagStoreMode.js";
 import type { FetchItem } from "../interfaces/fetchItem.js";
 export type { FetchItem };
 
@@ -59,17 +60,13 @@ export function tokenizeImap(input: string): ImapToken[] {
         break;
       }
       if (character === "[") {
-        let depth = 0;
-        while (index < input.length) {
+        index += 1;
+        let depth = 1;
+        while (index < input.length && depth > 0) {
           if (input[index] === "[") {
             depth += 1;
           } else if (input[index] === "]") {
             depth -= 1;
-            index += 1;
-            if (depth === 0) {
-              break;
-            }
-            continue;
           }
           index += 1;
         }
@@ -92,13 +89,21 @@ export function tokenizeImap(input: string): ImapToken[] {
         if (index >= input.length || input[index] === ")") {
           break;
         }
+        const position = index;
         list.push(readToken());
+        if (index === position) {
+          index += 1;
+        }
         skipSpace();
       }
       if (input[index] === ")") {
         index += 1;
       }
       return list;
+    }
+    if (input[index] === ")") {
+      index += 1;
+      return ")";
     }
     return readAtom();
   }
@@ -108,37 +113,87 @@ export function tokenizeImap(input: string): ImapToken[] {
     if (index >= input.length) {
       break;
     }
+    const position = index;
     tokens.push(readToken());
+    if (index === position) {
+      index += 1;
+    }
   }
   return tokens;
 }
 
-export function flagList(message: MessageRecord): string {
-  const names = flagFields.filter(([, field]) => message[field]).map(([name]) => name);
+const dateMonths = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+
+export function parseImapDateTime(value: string): string | null {
+  const match = /^(\d{1,2})-([A-Za-z]{3})-(\d{4}) (\d{2}):(\d{2}):(\d{2}) ([+-]\d{4})$/.exec(value.trim());
+  if (!match) {
+    return null;
+  }
+  const monthIndex = dateMonths.indexOf(match[2].toLowerCase());
+  const day = Number(match[1]);
+  const year = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+  if (monthIndex < 0 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 59) {
+    return null;
+  }
+  const zone = match[7];
+  const zoneSign = zone.startsWith("-") ? -1 : 1;
+  const zoneMinutes = zoneSign * (Number(zone.slice(1, 3)) * 60 + Number(zone.slice(3, 5)));
+  const utcMillis = Date.UTC(year, monthIndex, day, hour, minute, second) - zoneMinutes * 60 * 1000;
+  const date = new Date(utcMillis);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return date.toISOString();
+}
+
+export function appendDetails(tokens: ImapToken[]): { flagNames: string[]; receivedAt: string } {
+  const flagNames: string[] = [];
+  let receivedAt = "";
+  for (const token of tokens.slice(3)) {
+    if (Array.isArray(token)) {
+      flagNames.push(...token.map((item) => String(item)));
+      continue;
+    }
+    const received = parseImapDateTime(String(token));
+    if (received) {
+      receivedAt = received;
+    }
+  }
+  return { flagNames, receivedAt };
+}
+
+export function flagList(message: Pick<MessageRecord, FlagField | "keywords">): string {
+  const names = [
+    ...flagFields.filter(([, field]) => message[field]).map(([name]) => name),
+    ...(message.keywords || [])
+  ];
   return `FLAGS (${names.join(" ")})`;
 }
 
-export function parseStoreMode(word: string): { mode: "add" | "remove" | "replace"; silent: boolean } | null {
+export function parseStoreMode(word: string): { mode: FlagStoreMode; silent: boolean } | null {
   const upper = word.toUpperCase();
   const silent = upper.endsWith(".SILENT");
   const base = silent ? upper.slice(0, -".SILENT".length) : upper;
   if (base === "+FLAGS") {
-    return { mode: "add", silent };
+    return { mode: FlagStoreMode.Add, silent };
   }
   if (base === "-FLAGS") {
-    return { mode: "remove", silent };
+    return { mode: FlagStoreMode.Remove, silent };
   }
   if (base === "FLAGS") {
-    return { mode: "replace", silent };
+    return { mode: FlagStoreMode.Replace, silent };
   }
   return null;
 }
 
 export function applyFlags(
-  message: Pick<MessageRecord, FlagField>,
-  mode: "add" | "remove" | "replace",
+  message: Pick<MessageRecord, FlagField | "keywords">,
+  mode: FlagStoreMode,
   flagNames: string[]
-): Pick<MessageRecord, FlagField> {
+): Pick<MessageRecord, FlagField | "keywords"> {
   const next: Record<FlagField, boolean> = {
     seen: Boolean(message.seen),
     answered: Boolean(message.answered),
@@ -146,18 +201,29 @@ export function applyFlags(
     deleted: Boolean(message.deleted),
     draft: Boolean(message.draft)
   };
-  const known = flagNames
-    .map((name) => flagFields.find(([flag]) => flag.toLowerCase() === String(name).toLowerCase()))
-    .filter((item): item is [string, FlagField] => Boolean(item));
-  if (mode === "replace") {
+  let keywords = mode === FlagStoreMode.Replace ? [] : [...(message.keywords || [])];
+  if (mode === FlagStoreMode.Replace) {
     for (const field of Object.keys(next) as FlagField[]) {
       next[field] = false;
     }
   }
-  for (const [, field] of known) {
-    next[field] = mode !== "remove";
+  for (const name of flagNames.map((item) => String(item).trim()).filter(Boolean)) {
+    const field = flagFields.find(([flag]) => flag.toLowerCase() === name.toLowerCase())?.[1];
+    if (field) {
+      next[field] = mode !== FlagStoreMode.Remove;
+      continue;
+    }
+    if (name.startsWith("\\") || /[\s()"]/.test(name)) {
+      continue;
+    }
+    const exists = keywords.some((keyword) => keyword.toLowerCase() === name.toLowerCase());
+    if (mode === FlagStoreMode.Remove) {
+      keywords = keywords.filter((keyword) => keyword.toLowerCase() !== name.toLowerCase());
+    } else if (!exists) {
+      keywords.push(name);
+    }
   }
-  return next;
+  return { ...next, keywords };
 }
 
 export function selectedMessages(messages: MessageRecord[], setText: string, useUniqueIdentifier: boolean): Array<{ message: MessageRecord; sequence: number }> {
@@ -327,8 +393,12 @@ export function compileSearch(tokens: ImapToken[], messages: MessageRecord[], us
       return () => true;
     }
     if (word === "KEYWORD" || word === "UNKEYWORD") {
+      const keyword = String(working[index] ?? "");
       index += 1;
-      return () => word === "UNKEYWORD";
+      return (message) => {
+        const present = (message.keywords || []).some((item) => item.toLowerCase() === keyword.toLowerCase());
+        return word === "KEYWORD" ? present : !present;
+      };
     }
     if (/^(\d+|\*)$/.test(word) || word.includes(":")) {
       const matched = new Set(selectedMessages(messages, word, useUniqueIdentifier).map((item) => item.message.identifier));

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { domainKeySelector } from "../../../src/components/domainKey/index.js";
-import { createDnsGuide } from "../../../src/components/web/utils/dnsGuide.js";
+import { createDnsGuide, formatDnsGuideForTerminal } from "../../../src/components/web/utils/dnsGuide.js";
 
 describe("dns guide", () => {
   it("allows the public address with a soft failure and publishes DKIM and DMARC", () => {
@@ -36,6 +36,17 @@ describe("dns guide", () => {
     assert.equal(recordValue(guide.records, "v=spf1"), "v=spf1 ip4:149.28.152.245 ~all");
     assert.equal(guide.records.find((record) => record.host === "_dmarc.acme.test")?.value, "v=DMARC1; p=none; rua=mailto:ada@acme.test");
     assert.match(guide.zoneFile, /_dmarc\.acme\.test\.\t300\tIN\tTXT\t"v=DMARC1; p=none; rua=mailto:ada@acme\.test"/);
+  });
+
+  it("writes the zone file for the terminal under the company domain", () => {
+    const guide = createDnsGuide("acme.test", "mail.acme.test", "1.2.3.4", "v=DKIM1; k=rsa; p=abc", "ada@acme.test");
+    const text = formatDnsGuideForTerminal("acme.test", guide.zoneFile);
+    assert.match(text, /^DNS records for acme\.test\nPublish these records at the company DNS host before other companies can deliver mail\.\n\n/);
+    assert.match(text, /acme\.test\.\t300\tIN\tA\t1\.2\.3\.4/);
+    assert.match(text, /IN\tMX\t10 mail\.acme\.test\./);
+    assert.match(text, /v=DKIM1/);
+    assert.match(text, /rua=mailto:ada@acme\.test/);
+    assert.equal(text.includes("Open the web console and create the company"), false);
   });
 
   it("leaves the address blank when this server cannot discover it", () => {

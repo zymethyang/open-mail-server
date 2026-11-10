@@ -198,9 +198,21 @@ describe("mail protocol flow", { concurrency: 1 }, () => {
   });
 
   it("reads the mailbox with IMAP and POP3", async () => {
-    const mailbox = await connectPlain(listenerPort(server(), "IMAP", "Plain and STARTTLS"));
+    const plainMailbox = await connectPlain(listenerPort(server(), "IMAP", "Plain and STARTTLS"));
     try {
-      assert.match(await readResponse(mailbox), /IMAP4rev1/);
+      const greeting = await readResponse(plainMailbox);
+      assert.match(greeting, /IMAP4rev1/);
+      assert.match(greeting, /LOGINDISABLED/);
+      assert.doesNotMatch(greeting, /AUTH=PLAIN/);
+      plainMailbox.write("a1 LOGIN ada@acme.test correct-horse\r\n");
+      assert.match(await readResponse(plainMailbox, { tag: "a1" }), /Sign in requires TLS/);
+    } finally {
+      plainMailbox.end();
+    }
+
+    const mailbox = await connectTls(listenerPort(server(), "IMAP", "TLS"));
+    try {
+      assert.match(await readResponse(mailbox), /AUTH=PLAIN/);
       mailbox.write("a1 LOGIN ada@acme.test wrong-horse\r\n");
       assert.match(await readResponse(mailbox, { tag: "a1" }), /NO/);
       mailbox.write("a2 SELECT INBOX\r\n");
@@ -211,20 +223,44 @@ describe("mail protocol flow", { concurrency: 1 }, () => {
       assert.match(await readResponse(mailbox, { tag: "a4" }), /EXISTS/);
       mailbox.write("a5 SEARCH SUBJECT Protocol\r\n");
       assert.match(await readResponse(mailbox, { tag: "a5" }), /\* SEARCH/);
-      mailbox.write("a6 FETCH 1 (FLAGS ENVELOPE)\r\n");
+      mailbox.write("a6 FETCH 1 (FLAGS BODY.PEEK[HEADER.FIELDS (SUBJECT)])\r\n");
       const fetched = await readResponse(mailbox, { tag: "a6" });
-      assert.match(fetched, /Protocol check|ENVELOPE/);
-      mailbox.write("a7 IDLE\r\n");
+      assert.match(fetched, /Protocol check/);
+      const appended = Buffer.from(
+        "From: Ada <ada@acme.test>\r\nTo: ada@acme.test\r\nSubject: Appended\r\nDate: Thu, 02 Jan 2020 00:00:00 +0000\r\n\r\nStored by append.\r\n"
+      );
+      mailbox.write(`a7 APPEND INBOX (\\Seen $Forwarded) "01-Jan-2020 00:00:00 +0000" {${appended.length}}\r\n`);
+      assert.match(await readResponse(mailbox), /^\+/);
+      mailbox.write(appended);
+      mailbox.write("\r\n");
+      assert.match(await readResponse(mailbox, { tag: "a7" }), /APPEND completed/);
+      mailbox.write("a8 SELECT INBOX\r\n");
+      assert.match(await readResponse(mailbox, { tag: "a8" }), /EXISTS/);
+      mailbox.write("a9 FETCH 2 (FLAGS INTERNALDATE)\r\n");
+      const stored = await readResponse(mailbox, { tag: "a9" });
+      assert.match(stored, /\\Seen/);
+      assert.match(stored, /\$Forwarded/);
+      assert.match(stored, /01-Jan-2020 00:00:00 \+0000/);
+      mailbox.write("a10 IDLE\r\n");
       assert.match(await readResponse(mailbox), /idling/);
       mailbox.write("DONE\r\n");
-      assert.match(await readResponse(mailbox, { tag: "a7" }), /IDLE completed/);
-      mailbox.write("a8 LOGOUT\r\n");
-      await readResponse(mailbox, { tag: "a8" });
+      assert.match(await readResponse(mailbox, { tag: "a10" }), /IDLE completed/);
+      mailbox.write("a11 LOGOUT\r\n");
+      await readResponse(mailbox, { tag: "a11" });
     } finally {
       mailbox.end();
     }
 
-    const download = await connectPlain(listenerPort(server(), "POP3", "Plain and STLS"));
+    const plainDownload = await connectPlain(listenerPort(server(), "POP3", "Plain and STLS"));
+    try {
+      assert.match(await readResponse(plainDownload), /^\+OK/);
+      plainDownload.write("USER ada@acme.test\r\n");
+      assert.match(await readResponse(plainDownload), /Sign in requires TLS/);
+    } finally {
+      plainDownload.end();
+    }
+
+    const download = await connectTls(listenerPort(server(), "POP3", "TLS"));
     try {
       assert.match(await readResponse(download), /^\+OK/);
       download.write("PASS correct-horse\r\n");

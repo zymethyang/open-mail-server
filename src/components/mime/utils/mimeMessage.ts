@@ -3,6 +3,7 @@ import { months, weekdays } from "../constants/calendar.js";
 import type { AttachmentRecord, MessageDraft, ParsedMessage } from "../../message/interfaces/mailTypes.js";
 import { isValidAddress, normalizeAddress, splitAddress } from "../../text/index.js";
 import type { OutboundAttachment } from "../interfaces/outboundAttachment.js";
+import type { AddressPiece, HeaderMap, MimePart } from "../interfaces/mimePart.js";
 export type { OutboundAttachment };
 
 export function formatRfc5322Date(date: Date): string {
@@ -209,10 +210,6 @@ function decodeEncodedWords(value: string): string {
   });
 }
 
-interface HeaderMap {
-  [name: string]: string;
-}
-
 function parseHeaders(headerText: string): HeaderMap {
   const headers: HeaderMap = {};
   const unfolded = headerText.replace(/\r\n[ \t]+/g, " ").replace(/\n[ \t]+/g, " ");
@@ -246,11 +243,6 @@ function headerParameter(value: string, name: string): string {
 
 function mediaType(value: string): string {
   return (value.split(";")[0] || "").trim().toLowerCase();
-}
-
-interface AddressPiece {
-  name: string;
-  address: string;
 }
 
 function parseAddressHeader(value: string): AddressPiece[] {
@@ -303,12 +295,6 @@ function stripHtml(value: string): string {
     .replace(/&gt;/gi, ">")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-interface MimePart {
-  headers: HeaderMap;
-  body: Buffer;
-  children: MimePart[];
 }
 
 function splitBuffer(buffer: Buffer, marker: Buffer): Buffer[] {
@@ -460,6 +446,7 @@ export function createStoredMessage(parsed: ParsedMessage, rawBuffer: Buffer, en
     flagged: false,
     deleted: false,
     draft: false,
+    keywords: [],
     rawEncoded: rawBuffer.toString("base64"),
     rawSize: rawBuffer.length,
     attachments: parsed.attachments

@@ -1,22 +1,6 @@
 import type { ActivityDay } from "../../interfaces/models.js";
+import type { ChartBounds, ChartCounts, ChartPoint } from "../../interfaces/mailChart.js";
 import { escapeHtml } from "../../utils/escapeHtml.js";
-
-interface ChartPoint {
-  x: number;
-  y: number;
-}
-
-interface ChartBounds {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-}
-
-interface ChartCounts {
-  incoming: number;
-  outgoing: number;
-}
 
 let mailChartObserver: ResizeObserver | null = null;
 let mailChartObservedElement: Element | null = null;

@@ -431,29 +431,26 @@ async function submitCompose(): Promise<void> {
     attachments: [...applicationState.composeAttachments, ...prepared.attachments],
     inReplyTo: editor.dataset.replyTo || ""
   };
+  if (!toAddresses.length) {
+    showComposeProblem("Enter at least one recipient.", "compose-to");
+    return;
+  }
+  composeRequestActive = true;
+  showSendProgress(true);
   try {
-    if (!toAddresses.length) {
-      showComposeProblem("Enter at least one recipient.", "compose-to");
-      return;
-    }
-    composeRequestActive = true;
-    showSendProgress(true);
     await requestJson(ApiEndpoint.Messages, { method: "POST", body: JSON.stringify(payload) });
-    applicationState.folderName = MailFolderName.Sent;
-    closeComposer();
-    await mailboxActions.render();
   } catch (error) {
     if (sendFailureKeepsComposerOpen(error)) {
       showSendProgress(false);
       showComposeProblem(composeFailureMessage(error));
       return;
     }
-    applicationState.folderName = MailFolderName.Sent;
-    closeComposer();
-    await mailboxActions.render();
   } finally {
     composeRequestActive = false;
   }
+  applicationState.folderName = MailFolderName.Sent;
+  closeComposer();
+  await mailboxActions.render();
 }
 
 export function closeComposer(): void {

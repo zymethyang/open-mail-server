@@ -1,8 +1,4 @@
-export interface ConsoleDestination {
-  href: string;
-  label: string;
-  iconPath: string;
-}
+import type { ConsoleDestination } from "../interfaces/consoleDestination.js";
 
 const administratorDestinations: ConsoleDestination[] = [
   { href: "#overview", label: "Overview", iconPath: "icons/overview.svg" },

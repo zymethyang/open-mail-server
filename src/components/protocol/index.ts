@@ -14,6 +14,7 @@ export function createProtocolReader(options: { acceptLiterals: boolean; maximum
   let chain: Promise<void> = Promise.resolve();
   let socket: net.Socket | null = null;
   let closed = false;
+  let rejected = false;
 
   const reader: ProtocolReader = {
     onLine: () => undefined,
@@ -35,6 +36,20 @@ export function createProtocolReader(options: { acceptLiterals: boolean; maximum
       socket = nextSocket;
       closed = false;
       nextSocket.on("data", (chunk: Buffer) => {
+        if (closed || rejected) {
+          return;
+        }
+        const incoming = buffer.length + chunk.length;
+        if (collectingData && dataBytes + incoming > options.maximumDataBytes) {
+          rejectData();
+          return;
+        }
+        if (!collectingData && literalBytesRemaining === 0 && incoming > 1024 * 1024) {
+          rejected = true;
+          buffer = Buffer.alloc(0);
+          reader.close();
+          return;
+        }
         buffer = Buffer.concat([buffer, chunk]);
         schedule();
       });
@@ -74,11 +89,24 @@ export function createProtocolReader(options: { acceptLiterals: boolean; maximum
       });
   }
 
+  function rejectData(): void {
+    rejected = true;
+    buffer = Buffer.alloc(0);
+    dataChunks = [];
+    dataBytes = 0;
+    collectingData = false;
+    reader.send("552 Message is too large\r\n");
+    reader.close();
+  }
+
   async function pump(): Promise<void> {
-    while (!closed) {
+    while (!closed && !rejected) {
       if (collectingData) {
         const line = takeLineBuffer();
         if (!line) {
+          if (dataBytes + buffer.length > options.maximumDataBytes) {
+            rejectData();
+          }
           return;
         }
         if (line.length === 1 && line[0] === 0x2e) {
@@ -92,8 +120,7 @@ export function createProtocolReader(options: { acceptLiterals: boolean; maximum
         const content = line[0] === 0x2e ? line.subarray(1) : line;
         dataBytes += content.length + 2;
         if (dataBytes > options.maximumDataBytes) {
-          reader.send("552 Message is too large\r\n");
-          reader.close();
+          rejectData();
           return;
         }
         dataChunks.push(content, Buffer.from("\r\n"));

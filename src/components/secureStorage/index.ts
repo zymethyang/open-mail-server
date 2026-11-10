@@ -14,12 +14,8 @@ import {
   storageNonceBytes
 } from "./constants/storageCipher.js";
 import type { SealedEnvelope } from "./interfaces/sealedEnvelope.js";
+import type { LoadedStorageKey } from "./interfaces/loadedStorageKey.js";
 export type { SealedEnvelope };
-
-interface LoadedStorageKey {
-  master: Buffer;
-  derived: Buffer;
-}
 
 let storageKey: Promise<LoadedStorageKey> | null = null;
 

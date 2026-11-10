@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { FlagStoreMode } from "../../../../src/components/imap/enums/flagStoreMode.js";
 import {
+  appendDetails,
   applyFlags,
   compileSearch,
   expandAttributes,
@@ -8,6 +10,7 @@ import {
   flagList,
   listRequest,
   matchesPattern,
+  parseImapDateTime,
   parseStoreMode,
   selectedMessages,
   setsSeen,
@@ -41,26 +44,49 @@ describe("mailbox protocol logic", () => {
   it("tokenizes quoted text, atoms, and nested lists", () => {
     assert.deepEqual(tokenizeImap('LOGIN "ada@acme.test" "secret"'), ["LOGIN", "ada@acme.test", "secret"]);
     assert.deepEqual(tokenizeImap("FETCH 1 (FLAGS BODY.PEEK[HEADER])"), ["FETCH", "1", ["FLAGS", "BODY.PEEK[HEADER]"]]);
+    assert.deepEqual(tokenizeImap("FETCH 1 BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)]"), [
+      "FETCH",
+      "1",
+      "BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)]"
+    ]);
+    assert.deepEqual(tokenizeImap("SEARCH (SEEN))"), ["SEARCH", ["SEEN"], ")"]);
+    assert.deepEqual(tokenizeImap("FETCH 1 BODY[HEADER"), ["FETCH", "1", "BODY[HEADER"]);
     assert.deepEqual(tokenizeImap('"quote \\"here\\""'), ['quote "here"']);
   });
 
   it("lists, stores, and applies flags", () => {
     assert.equal(flagList(first), "FLAGS ()");
     assert.equal(flagList({ ...second, flagged: true }), "FLAGS (\\Seen \\Flagged \\Deleted)");
-    assert.deepEqual(parseStoreMode("+FLAGS.SILENT"), { mode: "add", silent: true });
-    assert.deepEqual(parseStoreMode("-FLAGS"), { mode: "remove", silent: false });
-    assert.deepEqual(parseStoreMode("FLAGS"), { mode: "replace", silent: false });
+    assert.deepEqual(parseStoreMode("+FLAGS.SILENT"), { mode: FlagStoreMode.Add, silent: true });
+    assert.deepEqual(parseStoreMode("-FLAGS"), { mode: FlagStoreMode.Remove, silent: false });
+    assert.deepEqual(parseStoreMode("FLAGS"), { mode: FlagStoreMode.Replace, silent: false });
     assert.equal(parseStoreMode("STORE"), null);
-    assert.deepEqual(applyFlags(first, "add", ["\\Seen", "\\Flagged"]), {
+    assert.deepEqual(applyFlags(first, FlagStoreMode.Add, ["\\Seen", "\\Flagged", "$Forwarded"]), {
       seen: true,
       answered: false,
       flagged: true,
       deleted: false,
-      draft: false
+      draft: false,
+      keywords: ["$Forwarded"]
     });
-    assert.equal(applyFlags(second, "remove", ["\\Deleted"]).deleted, false);
-    assert.equal(applyFlags(second, "replace", ["\\Answered"]).seen, false);
-    assert.equal(applyFlags(second, "replace", ["\\Answered"]).answered, true);
+    assert.equal(applyFlags(second, FlagStoreMode.Remove, ["\\Deleted"]).deleted, false);
+    assert.equal(applyFlags(second, FlagStoreMode.Replace, ["\\Answered"]).seen, false);
+    assert.equal(applyFlags(second, FlagStoreMode.Replace, ["\\Answered"]).answered, true);
+    assert.deepEqual(applyFlags({ ...first, keywords: ["$Forwarded", "ClientTag"] }, FlagStoreMode.Remove, ["clienttag"]).keywords, ["$Forwarded"]);
+    assert.deepEqual(applyFlags({ ...first, keywords: ["$Forwarded"] }, FlagStoreMode.Replace, ["\\Seen"]).keywords, []);
+    assert.equal(flagList({ ...first, seen: true, keywords: ["$Forwarded"] }), "FLAGS (\\Seen $Forwarded)");
+  });
+
+  it("keeps the client receipt time from an append command", () => {
+    assert.equal(parseImapDateTime("01-Jan-2020 00:00:00 +0000"), "2020-01-01T00:00:00.000Z");
+    assert.equal(parseImapDateTime("01-Jan-2020 00:00:00 -0500"), "2020-01-01T05:00:00.000Z");
+    assert.equal(parseImapDateTime("not a date"), null);
+    const details = appendDetails(tokenizeImap('A1 APPEND INBOX (\\Seen $Forwarded) "01-Jan-2020 00:00:00 +0000"'));
+    assert.deepEqual(details.flagNames, ["\\Seen", "$Forwarded"]);
+    assert.equal(details.receivedAt, "2020-01-01T00:00:00.000Z");
+    const forwarded = compileSearch(tokenizeImap("KEYWORD $Forwarded"), [{ ...first, keywords: ["$Forwarded"] }], false);
+    assert.equal(forwarded({ ...first, keywords: ["$Forwarded"] }), true);
+    assert.equal(forwarded(first), false);
   });
 
   it("selects sequence numbers and unique identifiers", () => {

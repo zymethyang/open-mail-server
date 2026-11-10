@@ -21,4 +21,14 @@ describe("mailbox events interface", () => {
     await new Promise((resolve) => setImmediate(resolve));
     assert.deepEqual(received, ["inbox", "second:ada@acme.test", "second:ada@acme.test"]);
   });
+
+  it("delivers a change to another mailbox listener", async () => {
+    const source = new MailboxEvents();
+    const other = new MailboxEvents();
+    const received: string[] = [];
+    other.subscribe((change) => received.push(change.folderStorageName));
+    source.publish({ address: "ada@acme.test", folderStorageName: "inbox" });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(received, ["inbox"]);
+  });
 });

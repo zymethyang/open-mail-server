@@ -72,6 +72,27 @@ describe("protocol logic", () => {
     }
   });
 
+  it("stops an unfinished data line before it can grow without a limit", async () => {
+    const pair = await openPair();
+    try {
+      const reader = createProtocolReader({ acceptLiterals: false, maximumDataBytes: 40 });
+      const started = new Promise<void>((resolve) => {
+        reader.onLine = () => {
+          resolve();
+          return "collect-data";
+        };
+      });
+      reader.attach(pair.serverSocket);
+      pair.client.write("DATA\r\n");
+      await started;
+      pair.client.write("x".repeat(80));
+      const response = await readResponse(pair.client);
+      assert.match(response, /^552 /);
+    } finally {
+      pair.close();
+    }
+  });
+
   it("refuses a data block larger than the configured limit", async () => {
     const pair = await openPair();
     try {

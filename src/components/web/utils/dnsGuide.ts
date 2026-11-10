@@ -1,15 +1,5 @@
 import { domainKeySelector } from "../../domainKey/index.js";
-
-export interface DnsGuideRecord {
-  type: string;
-  host: string;
-  value: string;
-}
-
-export interface DnsGuide {
-  records: DnsGuideRecord[];
-  zoneFile: string;
-}
+import type { DnsGuide, DnsGuideRecord } from "../interfaces/dnsGuide.js";
 
 export function createDnsGuide(
   domain: string,
@@ -31,6 +21,15 @@ export function createDnsGuide(
     { type: "TXT", host: `_dmarc.${domain}`, value: `v=DMARC1; p=none; rua=mailto:${reportMailbox}` }
   ];
   return { records, zoneFile: formatZoneFile(records) };
+}
+
+export function formatDnsGuideForTerminal(domain: string, zoneFile: string): string {
+  return [
+    `DNS records for ${domain}`,
+    "Publish these records at the company DNS host before other companies can deliver mail.",
+    "",
+    zoneFile.trimEnd()
+  ].join("\n");
 }
 
 function senderPolicy(address: string): string {

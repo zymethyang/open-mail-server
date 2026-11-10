@@ -1,13 +1,6 @@
-export interface CodeVersion {
-  version: number;
-  errorCodewordsPerBlock: number;
-  firstGroupBlocks: number;
-  firstGroupData: number;
-  secondGroupBlocks: number;
-  secondGroupData: number;
-  remainderBits: number;
-  alignmentCenters: number[];
-}
+import type { CodeVersion } from "../interfaces/codeVersion.js";
+
+export type { CodeVersion };
 
 export const codeVersions: CodeVersion[] = [
   { version: 1, errorCodewordsPerBlock: 10, firstGroupBlocks: 1, firstGroupData: 16, secondGroupBlocks: 0, secondGroupData: 0, remainderBits: 0, alignmentCenters: [] },

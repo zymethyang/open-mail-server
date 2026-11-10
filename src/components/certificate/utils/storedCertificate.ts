@@ -3,13 +3,10 @@ import { chmod, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import tls from "node:tls";
 import type { CertificateDescription } from "../interfaces/certificateDescription.js";
+import type { ParsedCertificate } from "../interfaces/parsedCertificate.js";
+import type { PreparedCertificate } from "../interfaces/preparedCertificate.js";
 
 const maximumPemCharacters = 64 * 1024;
-
-interface ParsedCertificate {
-  pem: string;
-  certificate: X509Certificate;
-}
 
 function certificateNames(parsed: X509Certificate): string[] {
   const names = new Set<string>();
@@ -63,12 +60,6 @@ function assertCurrent(certificate: X509Certificate): void {
 function findIssuer(child: X509Certificate, candidates: ParsedCertificate[]): ParsedCertificate | undefined {
   const signers = candidates.filter((item) => item.certificate !== child && signedBy(child, item.certificate));
   return signers.find((item) => item.certificate.subject === child.issuer) || signers[0];
-}
-
-export interface PreparedCertificate {
-  description: CertificateDescription;
-  certificate: string;
-  privateKey: string;
 }
 
 export function prepareCertificateMaterial(certificatePem: string, privateKeyPem: string, intermediateCertificatesPem = ""): PreparedCertificate {

@@ -1,6 +1,7 @@
 import path from "node:path";
 import { AccountRole } from "./enums/accountRole.js";
 import type { AccountRepository as AccountRepositoryContract } from "./interfaces/accountRepository.js";
+import type { AccountFile } from "./interfaces/accountFile.js";
 import type { AccountRecord, PublicAccount } from "./interfaces/accountRecord.js";
 import { cleanDisplayName } from "../text/index.js";
 import { isValidAddress, normalizeAddress } from "../text/index.js";
@@ -8,10 +9,6 @@ import { decodeBase32, oneTimePasswordMatches as secretMatchesCode } from "../on
 import { hashPassword, passwordsMatch } from "./utils/passwordHasher.js";
 import { withLock } from "../jsonFile/index.js";
 import { readJson, writeJson } from "../jsonFile/index.js";
-
-interface AccountFile {
-  accounts?: AccountRecord[];
-}
 
 function publicAccount(record: AccountRecord): PublicAccount {
   return {

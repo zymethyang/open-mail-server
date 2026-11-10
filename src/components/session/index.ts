@@ -2,12 +2,9 @@ import { randomBytes } from "node:crypto";
 import path from "node:path";
 import type { AccountRole } from "../account/enums/accountRole.js";
 import type { SessionRecord, SessionRepository as SessionRepositoryContract } from "./interfaces/sessionRepository.js";
+import type { SessionFile } from "./interfaces/sessionFile.js";
 import { withLock } from "../jsonFile/index.js";
 import { readJson, writeJson } from "../jsonFile/index.js";
-
-interface SessionFile {
-  sessions?: Record<string, SessionRecord>;
-}
 
 function createSessionRepository(storageDirectory: string): SessionRepositoryContract {
   const filePath = path.join(storageDirectory, "sessions.json");

@@ -1,5 +1,6 @@
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign, verify } from "node:crypto";
 import path from "node:path";
+import type { DomainKey, HeaderField, StoredDomainKey } from "./interfaces/domainKey.js";
 import { readJson, writeJson, withLock } from "../jsonFile/index.js";
 import { splitHeaderAndBody } from "../mime/index.js";
 
@@ -7,19 +8,7 @@ export const domainKeySelector = "mail";
 
 const signedHeaderNames = ["from", "to", "cc", "subject", "date", "message-id", "mime-version", "content-type"];
 
-export interface DomainKey {
-  privateKey: string;
-  recordValue: string;
-}
-
-interface HeaderField {
-  name: string;
-  value: string;
-}
-
-interface StoredDomainKey {
-  privateKey?: string;
-}
+export type { DomainKey };
 
 export async function openDomainKey(storageDirectory: string): Promise<DomainKey> {
   return withLock(`domain-key:${storageDirectory}`, async () => {

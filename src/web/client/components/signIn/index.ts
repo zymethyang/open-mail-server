@@ -4,10 +4,7 @@ import { element } from "../../utils/element.js";
 import { errorMessage } from "../../utils/errorMessage.js";
 import { clearFormErrors, showFormError } from "../../utils/formFeedback.js";
 import { loadBootstrap } from "../../session/loadBootstrap.js";
-
-interface SessionResponse {
-  oneTimePasswordRequired?: boolean;
-}
+import type { SessionResponse } from "../../interfaces/sessionResponse.js";
 
 export function resetSignInStep(): void {
   const codeStep = element<HTMLElement>("#sign-in-code-step");

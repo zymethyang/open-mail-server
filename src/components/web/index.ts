@@ -18,23 +18,24 @@ import { ApiEndpoint, matchApiEndpoint } from "./enums/apiEndpoint.js";
 import type { MessageRecord } from "../message/interfaces/mailTypes.js";
 import type { MailboxEvents } from "../mailboxEvents/interfaces/mailboxEvents.js";
 import type { PublicAccount } from "../account/interfaces/accountRecord.js";
+import type { PendingSignIn, ServerRequest } from "./interfaces/serverRequest.js";
 import { assertAddressList, isValidAddress, normalizeAddress, parseAddressList } from "../text/index.js";
-import type { DeliveryService } from "../delivery/index.js";
+import type { DeliveryService } from "../delivery/interfaces/delivery.js";
 import { checkPublicPorts } from "../publicPort/index.js";
 import type { OrganizationRecord } from "../organization/interfaces/organizationRecord.js";
 import { openDomainKey } from "../domainKey/index.js";
-import { createDnsGuide } from "./utils/dnsGuide.js";
+import { createDnsGuide, formatDnsGuideForTerminal } from "./utils/dnsGuide.js";
 import { displayedImageType } from "./utils/displayedImageType.js";
 import { createMessageIdentifier, createRawMessage, parseRawMessage, sanitizeMessageHtml, type OutboundAttachment } from "../mime/index.js";
 import { createSnippet } from "../mime/index.js";
 import { listen } from "../protocol/utils/listen.js";
 import { secureOptions } from "../protocol/utils/transportSecurity.js";
-import type { AccountRepository } from "../account/index.js";
-import type { ActivityLogger } from "../activity/index.js";
-import type { MessageRepository } from "../message/index.js";
-import type { OrganizationRepository } from "../organization/index.js";
-import type { SessionRepository } from "../session/index.js";
-import type { SettingsRepository } from "../settings/index.js";
+import type { AccountRepository } from "../account/interfaces/accountRepository.js";
+import type { ActivityLogger } from "../activity/interfaces/activityLogger.js";
+import type { MessageRepository } from "../message/interfaces/messageRepository.js";
+import type { OrganizationRepository } from "../organization/interfaces/organizationRepository.js";
+import type { SessionRepository } from "../session/interfaces/sessionRepository.js";
+import type { SettingsRepository } from "../settings/interfaces/settings.js";
 import type { CertificateDescription, ServerCertificate } from "../certificate/index.js";
 import type { SignInGuard } from "../signIn/interfaces/signInGuard.js";
 import type { ListenerStatus } from "./interfaces/listenerStatus.js";
@@ -42,14 +43,6 @@ import { projectDirectoryFrom } from "../configuration/utils/projectDirectory.js
 import { messageSendError } from "./utils/messageSendError.js";
 import { authenticatorImage, createOneTimePasswordSecret, oneTimePasswordUri } from "../oneTimePassword/index.js";
 export type { ListenerStatus };
-
-interface ServerRequest {
-  request: http.IncomingMessage;
-  response: http.ServerResponse;
-  url: URL;
-  account: PublicAccount | null;
-  body: Record<string, unknown>;
-}
 
 const frontendExtensions = new Set([".html", ".css", ".js", ".svg"]);
 
@@ -147,11 +140,6 @@ function writeSessionCookie(response: http.ServerResponse, identifier: string, s
     cookieLine("session", identifier, secure, identifier ? 7 * 24 * 60 * 60 : 0),
     cookieLine("pending", "", secure, 0)
   ]);
-}
-
-interface PendingSignIn {
-  address: string;
-  expiresAt: number;
 }
 
 const pendingSignIns = new Map<string, PendingSignIn>();
@@ -379,6 +367,14 @@ export function createWebServer(dependencies: {
         await dependencies.messageRepository.ensureMailbox(account.address);
         const identifier = await dependencies.sessionRepository.create(account.address, account.role);
         writeSessionCookie(response, identifier, connectionIsSecure(request));
+        try {
+          const hosting = await hostingGuide(created);
+          console.log("");
+          console.log(formatDnsGuideForTerminal(created.domain, hosting.zoneFile));
+          console.log("");
+        } catch (error) {
+          console.error((error as Error).message);
+        }
         sendJson(response, 201, { organization: created, account });
       } catch (error) {
         await dependencies.organizationRepository.remove();

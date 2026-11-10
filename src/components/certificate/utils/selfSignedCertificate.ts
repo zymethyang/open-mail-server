@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import type { GeneratedCertificate } from "../interfaces/generatedCertificate.js";
-export type { GeneratedCertificate };
+import type { AuthoritySignedCertificate } from "../interfaces/authoritySignedCertificate.js";
+export type { GeneratedCertificate, AuthoritySignedCertificate };
 
 function encodeLength(length: number): Buffer {
   if (length < 128) {
@@ -202,13 +203,6 @@ export function generateSelfSignedCertificate(domains: string[]): GeneratedCerti
     privateKey: keys.privateKeyPem,
     certificate: pem("CERTIFICATE", certificate)
   };
-}
-
-export interface AuthoritySignedCertificate {
-  rootCertificate: string;
-  intermediateCertificate: string;
-  certificate: string;
-  privateKey: string;
 }
 
 export function generateAuthoritySignedCertificate(names: string[]): AuthoritySignedCertificate {

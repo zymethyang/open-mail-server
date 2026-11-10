@@ -45,6 +45,7 @@ export interface MessageDraft {
   flagged: boolean;
   deleted: boolean;
   draft: boolean;
+  keywords?: string[];
   rawEncoded: string;
   rawSize: number;
   attachments: AttachmentRecord[];

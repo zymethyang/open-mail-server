@@ -3,9 +3,10 @@ import tls from "node:tls";
 import type { Configuration } from "../configuration/index.js";
 import { oneLine } from "../text/index.js";
 import { extractEnvelopeAddress, isValidAddress, normalizeAddress } from "../text/index.js";
-import type { DeliveryService } from "../delivery/index.js";
-import type { AccountRepository } from "../account/index.js";
-import type { ActivityLogger } from "../activity/index.js";
+import type { DeliveryService } from "../delivery/interfaces/delivery.js";
+import { verifyProtocolSignIn } from "../account/utils/protocolSignIn.js";
+import type { AccountRepository } from "../account/interfaces/accountRepository.js";
+import type { ActivityLogger } from "../activity/interfaces/activityLogger.js";
 import type { ServerCertificate } from "../certificate/index.js";
 import type { SignInGuard } from "../signIn/interfaces/signInGuard.js";
 import { ActivityAction } from "../activity/enums/activityAction.js";
@@ -16,19 +17,8 @@ import { createProtocolReader } from "../protocol/index.js";
 import { secureOptions, upgradeToTls } from "../protocol/utils/transportSecurity.js";
 import { SmtpCommand } from "./enums/smtpCommand.js";
 import type { SmtpEndpoint } from "./interfaces/smtpEndpoint.js";
+import type { SmtpSessionState } from "./interfaces/smtpSessionState.js";
 export type { SmtpEndpoint };
-
-interface SmtpSessionState {
-  secure: boolean;
-  greeted: boolean;
-  mailAccepted: boolean;
-  accountAddress: string;
-  senderAddress: string;
-  recipients: string[];
-  authenticationStep: "" | "login-username" | "login-password" | "plain";
-  authenticationUsername: string;
-  remoteAddress: string;
-}
 
 export class SmtpServer {
   constructor(private readonly input: {
@@ -98,9 +88,10 @@ export class SmtpServer {
         reader.send(`454 4.7.0 ${blocked}\r\n`);
         return;
       }
-      const account = await input.accountRepository.verifyCredentials(username, password);
-      if (!account) {
+      const result = await verifyProtocolSignIn(input.accountRepository, username, password);
+      if (!result.account) {
         input.signInGuard.recordFailure(key);
+        const detail = "Invalid credentials";
         await input.activityLogger.record({
           protocol: MailProtocol.Smtp,
           action: ActivityAction.SignIn,
@@ -111,11 +102,12 @@ export class SmtpServer {
           subject: "",
           byteCount: 0,
           result: ActivityResult.Rejected,
-          detail: "invalid credentials"
+          detail
         });
-        reader.send("535 5.7.8 Invalid credentials\r\n");
+        reader.send(`535 5.7.8 ${detail}\r\n`);
         return;
       }
+      const account = result.account;
       input.signInGuard.recordSuccess(key);
       session.accountAddress = account.address;
       reader.send("235 2.7.0 Authentication succeeded\r\n");

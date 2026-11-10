@@ -1,14 +1,28 @@
 import { signInAttemptLimit, signInBlockMilliseconds, signInWindowMilliseconds } from "./constants/signInLimits.js";
 import type { SignInGuard as SignInGuardContract } from "./interfaces/signInGuard.js";
-
-interface FailureRecord {
-  count: number;
-  startedAt: number;
-  blockedUntil: number;
-}
+import type { SignInFailureRecord, SignInNotice } from "./interfaces/signInNotice.js";
 
 export class SignInGuard implements SignInGuardContract {
-  private readonly failures = new Map<string, FailureRecord>();
+  private readonly failures = new Map<string, SignInFailureRecord>();
+  private readonly channel = new BroadcastChannel("email-server-sign-in");
+
+  constructor() {
+    (this.channel as BroadcastChannel & { unref(): void }).unref();
+    this.channel.addEventListener("message", (event: MessageEvent<SignInNotice>) => {
+      const notice = event.data;
+      if (!notice || notice.kind !== "sign-in" || typeof notice.key !== "string") {
+        return;
+      }
+      if (!notice.record) {
+        this.failures.delete(notice.key);
+        return;
+      }
+      const current = this.failures.get(notice.key);
+      if (!current || notice.record.count >= current.count || notice.record.blockedUntil >= current.blockedUntil) {
+        this.failures.set(notice.key, notice.record);
+      }
+    });
+  }
 
   rejectionMessage(key: string): string {
     const record = this.failures.get(key);
@@ -35,9 +49,11 @@ export class SignInGuard implements SignInGuardContract {
       record.blockedUntil = now + signInBlockMilliseconds;
     }
     this.failures.set(key, record);
+    this.channel.postMessage({ kind: "sign-in", key, record: { ...record } });
   }
 
   recordSuccess(key: string): void {
     this.failures.delete(key);
+    this.channel.postMessage({ kind: "sign-in", key, record: null });
   }
 }

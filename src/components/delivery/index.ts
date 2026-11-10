@@ -3,6 +3,7 @@ import { readdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { readJson, writeJson } from "../jsonFile/index.js";
 import type { DeliveryDependencies, DeliveryService as DeliveryServiceContract, FailedEmail } from "./interfaces/delivery.js";
+import type { QueuedDelivery } from "./interfaces/queuedDelivery.js";
 import type { MailRelaySettings } from "../settings/interfaces/settings.js";
 import { domainOf, normalizeAddress } from "../text/index.js";
 import { deliverToExchange, type SubmissionRelay } from "../outboundMail/index.js";
@@ -12,18 +13,6 @@ import { ActivityResult } from "../activity/enums/activityResult.js";
 import { MailFolderName } from "../message/enums/mailFolderName.js";
 import { MailProtocol } from "../protocol/enums/mailProtocol.js";
 import { oneLine } from "../text/index.js";
-
-interface QueuedDelivery {
-  identifier: string;
-  serverDomain: string;
-  senderAddress: string;
-  authenticatedAddress: string;
-  recipientAddresses: string[];
-  rawEncoded: string;
-  attempts: number;
-  nextAttemptAt: string;
-  lastError: string;
-}
 
 function deliveryError(message: string, statusCode = 550): Error {
   return Object.assign(new Error(message), { statusCode });

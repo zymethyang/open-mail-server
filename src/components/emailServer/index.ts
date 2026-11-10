@@ -1,217 +1,184 @@
-import type { Server } from "node:net";
-import os from "node:os";
-import tls from "node:tls";
+import { Worker } from "node:worker_threads";
 import type { Configuration } from "../configuration/index.js";
 import { configurationWithListeners, loadConfiguration } from "../configuration/index.js";
-import { createWebServer, startWebServer, type ListenerStatus } from "../web/index.js";
-import { DeliveryService } from "../delivery/index.js";
-import type { MailExchangeResolver } from "../mailExchange/interfaces/mailExchange.js";
+import type { MailExchange, MailExchangeResolver } from "../mailExchange/interfaces/mailExchange.js";
 import { DnsMailExchangeResolver } from "../mailExchange/index.js";
-import { MailboxEvents } from "../mailboxEvents/index.js";
-import { ImapServer } from "../imap/index.js";
-import { describeListenError } from "../protocol/utils/listen.js";
-import { Pop3Server } from "../pop3/index.js";
-import { SmtpServer } from "../smtp/index.js";
-import { describeCertificateMaterial, ensureSelfSignedCertificate, prepareCertificateMaterial, storeCertificateMaterial } from "../certificate/index.js";
-import { secureOptions } from "../protocol/utils/transportSecurity.js";
-import { createOutgoingSigner } from "../domainKey/index.js";
 import { openSecureStorage } from "../secureStorage/index.js";
 import { SettingsRepository } from "../settings/index.js";
-import { SignInGuard } from "../signIn/index.js";
-import { AccountRepository } from "../account/index.js";
-import { ActivityLogger } from "../activity/index.js";
-import { MessageRepository } from "../message/index.js";
-import { OrganizationRepository } from "../organization/index.js";
-import { SessionRepository } from "../session/index.js";
+import type { ListenerStatus } from "../web/interfaces/listenerStatus.js";
+import { ensureMailCertificate } from "./mailRuntime.js";
+import { serviceNames, ServiceName } from "./serviceNames.js";
+import { WorkerMessageKind } from "./enums/workerMessageKind.js";
+import type { WorkerMessage } from "./interfaces/workerMessage.js";
 import type { RunningEmailServer } from "./interfaces/runningEmailServer.js";
 export type { RunningEmailServer };
-
-function localCertificateNames(): string[] {
-  const names = ["localhost", "127.0.0.1"];
-  for (const records of Object.values(os.networkInterfaces())) {
-    for (const record of records || []) {
-      const family = String(record.family);
-      const linkLocal = record.address.startsWith("169.254.");
-      if ((family !== "IPv4" && family !== "4") || record.internal || linkLocal || names.includes(record.address)) {
-        continue;
-      }
-      names.push(record.address);
-    }
-  }
-  return names;
-}
-
-async function remember(
-  listeners: ListenerStatus[],
-  servers: Server[],
-  description: Omit<ListenerStatus, "started" | "detail" | "port"> & { port: number },
-  starter: () => Promise<{ server: Server; port: number }>
-): Promise<void> {
-  try {
-    const started = await starter();
-    servers.push(started.server);
-    listeners.push({ ...description, port: started.port, started: true, detail: "" });
-  } catch (error) {
-    listeners.push({ ...description, started: false, detail: describeListenError(error as NodeJS.ErrnoException) });
-  }
-}
 
 export async function startEmailServer(options?: {
   configuration?: Configuration;
   mailExchangeResolver?: MailExchangeResolver;
 }): Promise<RunningEmailServer> {
-  const baseConfiguration = options?.configuration || loadConfiguration();
-  await openSecureStorage(baseConfiguration.storageDirectory);
-  const accountRepository = new AccountRepository(baseConfiguration.storageDirectory);
-  const settingsRepository = new SettingsRepository(baseConfiguration.storageDirectory);
-  const storedSettings = await settingsRepository.read();
-  const configuration =
-    options?.configuration || !storedSettings.listenersSaved
-      ? baseConfiguration
-      : configurationWithListeners(baseConfiguration, storedSettings.listeners);
-  const organizationRepository = new OrganizationRepository(configuration.storageDirectory);
-  const mailboxEvents = new MailboxEvents();
-  const messageRepository = new MessageRepository(configuration.storageDirectory, mailboxEvents);
-  const sessionRepository = new SessionRepository(configuration.storageDirectory);
-  const activityLogger = new ActivityLogger(configuration.storageDirectory);
-  const signInGuard = new SignInGuard();
-  const organization = await organizationRepository.read();
-  const certificate = await ensureSelfSignedCertificate(configuration.storageDirectory, [
-    ...localCertificateNames(),
-    configuration.configuredDomain,
-    configuration.publicHostname,
-    storedSettings.publicHostname,
-    organization?.domain || ""
-  ]);
-  const serverName = async (): Promise<string> => {
-    const settings = await settingsRepository.read();
-    if (settings.publicHostname) {
-      return settings.publicHostname;
-    }
-    if (configuration.publicHostname) {
-      return configuration.publicHostname;
-    }
-    const currentOrganization = await organizationRepository.read();
-    return currentOrganization?.domain || configuration.configuredDomain || "localhost";
-  };
-  const signingDomain = async () => (await organizationRepository.read())?.domain || configuration.configuredDomain;
-  const deliveryService = new DeliveryService({
-    storageDirectory: configuration.storageDirectory,
-    accountRepository,
-    messageRepository,
-    activityLogger,
-    mailExchangeResolver: options?.mailExchangeResolver || new DnsMailExchangeResolver(),
-    serverDomain: signingDomain,
-    announceName: serverName,
-    readRelay: () => settingsRepository.read().then((settings) => settings.relay),
-    signOutgoingMessage: createOutgoingSigner(configuration.storageDirectory, signingDomain)
-  });
+  const configuration = await resolveConfiguration(options);
+  await ensureMailCertificate(configuration);
+  const mailExchangeResolver = options?.mailExchangeResolver || new DnsMailExchangeResolver();
   const listeners: ListenerStatus[] = [];
-  const servers: Server[] = [];
-  const shared = {
-    configuration,
-    certificate,
-    accountRepository,
-    signInGuard,
-    activityLogger
-  };
+  const workers = new Map<ServiceName, Worker>();
+  const runningWorkers = new Set<Worker>();
+  const reported = new Map<ServiceName, ListenerStatus[]>();
+  const ready = new Set<ServiceName>();
+  let stopping = false;
+  let acceptRestart = false;
+  let resolveStartup = (): void => undefined;
+  let rejectStartup = (_error: Error): void => undefined;
+  const startup = new Promise<void>((resolve, reject) => {
+    resolveStartup = resolve;
+    rejectStartup = reject;
+  });
+  const startupTimer = setTimeout(() => {
+    failStartup(new Error("The mail services did not start"));
+  }, 20_000);
 
-  await remember(listeners, servers, { name: "SMTP", port: configuration.smtpPort, security: "Plain and STARTTLS", purpose: "Receive mail" }, () =>
-    new SmtpServer({
-      ...shared,
-      endpoint: { port: configuration.smtpPort, secure: false, requireAuthentication: false },
-      deliveryService,
-      serverName
-    }).start()
-  );
-  await remember(listeners, servers, { name: "SMTP", port: configuration.smtpSecurePort, security: "TLS", purpose: "Send mail" }, () =>
-    new SmtpServer({
-      ...shared,
-      endpoint: { port: configuration.smtpSecurePort, secure: true, requireAuthentication: true },
-      deliveryService,
-      serverName
-    }).start()
-  );
-  await remember(listeners, servers, { name: "SMTP", port: configuration.smtpSubmissionPort, security: "STARTTLS", purpose: "Send mail" }, () =>
-    new SmtpServer({
-      ...shared,
-      endpoint: { port: configuration.smtpSubmissionPort, secure: false, requireAuthentication: true },
-      deliveryService,
-      serverName
-    }).start()
-  );
-  await remember(listeners, servers, { name: "IMAP", port: configuration.imapPort, security: "Plain and STARTTLS", purpose: "Read mail" }, () =>
-    new ImapServer({ ...shared, port: configuration.imapPort, secure: false, messageRepository, mailboxEvents }).start()
-  );
-  await remember(listeners, servers, { name: "IMAP", port: configuration.imapSecurePort, security: "TLS", purpose: "Read mail" }, () =>
-    new ImapServer({ ...shared, port: configuration.imapSecurePort, secure: true, messageRepository, mailboxEvents }).start()
-  );
-  await remember(listeners, servers, { name: "POP3", port: configuration.pop3Port, security: "Plain and STLS", purpose: "Read mail" }, () =>
-    new Pop3Server({ ...shared, port: configuration.pop3Port, secure: false, messageRepository }).start()
-  );
-  await remember(listeners, servers, { name: "POP3", port: configuration.pop3SecurePort, security: "TLS", purpose: "Read mail" }, () =>
-    new Pop3Server({ ...shared, port: configuration.pop3SecurePort, secure: true, messageRepository }).start()
-  );
-
-  async function replaceCertificate(certificatePem: string, privateKeyPem: string, intermediateCertificatesPem = "") {
-    const prepared = prepareCertificateMaterial(certificatePem, privateKeyPem, intermediateCertificatesPem);
-    const description = await storeCertificateMaterial(configuration.storageDirectory, certificatePem, privateKeyPem, intermediateCertificatesPem);
-    certificate.privateKey = prepared.privateKey;
-    certificate.certificate = prepared.certificate;
-    const material = { privateKey: prepared.privateKey, certificate: prepared.certificate };
-    for (const server of servers) {
-      const secureServer = server as tls.Server;
-      if (typeof secureServer.setSecureContext === "function") {
-        secureServer.setSecureContext(secureOptions(material));
-      }
+  function failStartup(error: Error): void {
+    if (acceptRestart || stopping) {
+      return;
     }
-    return description;
+    stopping = true;
+    clearTimeout(startupTimer);
+    rejectStartup(error);
+    for (const worker of workers.values()) {
+      void worker.terminate();
+    }
   }
 
-  const webServer = createWebServer({
-    configuration,
-    accountRepository,
-    organizationRepository,
-    messageRepository,
-    mailboxEvents,
-    sessionRepository,
-    activityLogger,
-    deliveryService,
-    signInGuard,
-    listenerStatus: listeners,
-    certificate,
-    serverName,
-    settingsRepository,
-    readCertificate: async () => describeCertificateMaterial(certificate.certificate, certificate.privateKey),
-    replaceCertificate
-  });
-  await remember(listeners, servers, { name: "Web", port: configuration.webPort, security: configuration.secureWeb ? "HTTPS" : "HTTP", purpose: "Administrator and mailbox" }, async () => {
-    const port = await startWebServer(webServer, configuration.webPort, configuration.host);
-    return { server: webServer, port };
-  });
+  function publishListeners(): void {
+    const next = serviceNames.flatMap((service) => reported.get(service) || []);
+    listeners.splice(0, listeners.length, ...next);
+    const webWorker = workers.get(ServiceName.Web);
+    if (webWorker && runningWorkers.has(webWorker)) {
+      webWorker.postMessage({ kind: WorkerMessageKind.Listeners, listeners: next });
+    }
+  }
 
-  const queueTimer = setInterval(() => {
-    deliveryService.processQueue().catch((error: Error) => {
-      console.error(`Outbound queue failed: ${error.message}`);
+  function handleMessage(service: ServiceName, worker: Worker, message: WorkerMessage): void {
+    if (workers.get(service) !== worker) {
+      return;
+    }
+    if (message.kind === WorkerMessageKind.ResolveMailExchange && message.requestId && message.domain) {
+      void mailExchangeResolver.resolve(message.domain).then(
+        (records: MailExchange[]) => {
+          if (workers.get(service) === worker) {
+            worker.postMessage({ kind: WorkerMessageKind.ParentResponse, requestId: message.requestId, records });
+          }
+        },
+        (error: Error) => {
+          if (workers.get(service) === worker) {
+            worker.postMessage({ kind: WorkerMessageKind.ParentResponse, requestId: message.requestId, error: error.message });
+          }
+        }
+      );
+      return;
+    }
+    if (message.kind === WorkerMessageKind.Failed) {
+      failStartup(new Error(message.detail || `${service} failed to start`));
+      return;
+    }
+    if (message.kind === WorkerMessageKind.Listening) {
+      reported.set(service, message.listeners || []);
+      if (reported.size === serviceNames.length) {
+        publishListeners();
+      }
+      return;
+    }
+    if (message.kind === WorkerMessageKind.Ready) {
+      ready.add(service);
+      if (!acceptRestart && ready.size === serviceNames.length) {
+        acceptRestart = true;
+        clearTimeout(startupTimer);
+        resolveStartup();
+      }
+    }
+  }
+
+  function spawn(service: ServiceName): void {
+    const worker = new Worker(new URL("./serviceWorker.js", import.meta.url), {
+      workerData: { service, configuration }
     });
-  }, 30 * 1000);
-  queueTimer.unref();
+    workers.set(service, worker);
+    runningWorkers.add(worker);
+    worker.on("message", (message: WorkerMessage) => handleMessage(service, worker, message));
+    worker.on("error", (error) => {
+      console.error(`${service} worker error: ${error.message}`);
+      if (!acceptRestart) {
+        failStartup(error);
+      }
+    });
+    worker.on("exit", (code) => {
+      runningWorkers.delete(worker);
+      if (stopping || workers.get(service) !== worker) {
+        return;
+      }
+      if (!acceptRestart) {
+        failStartup(new Error(`${service} worker stopped before it was ready`));
+        return;
+      }
+      console.error(`${service} worker stopped (${code}). Starting it again.`);
+      ready.delete(service);
+      setTimeout(() => {
+        if (!stopping) {
+          spawn(service);
+        }
+      }, 300);
+    });
+  }
+
+  for (const service of serviceNames) {
+    spawn(service);
+  }
+  try {
+    await startup;
+  } catch (error) {
+    stopping = true;
+    await Promise.all([...workers.values()].map((worker) => worker.terminate()));
+    throw error;
+  }
 
   return {
     configuration,
     listeners,
     async stop() {
-      clearInterval(queueTimer);
+      stopping = true;
+      clearTimeout(startupTimer);
       await Promise.all(
-        servers.map(
-          (server) =>
+        [...workers.values()].map(
+          (worker) =>
             new Promise<void>((resolve) => {
-              const listeningServer = server as Server & { closeAllConnections?: () => void };
-              listeningServer.closeAllConnections?.();
-              server.close(() => resolve());
+              if (!runningWorkers.has(worker)) {
+                resolve();
+                return;
+              }
+              const timer = setTimeout(() => {
+                void worker.terminate().finally(() => resolve());
+              }, 5_000);
+              worker.once("exit", () => {
+                clearTimeout(timer);
+                resolve();
+              });
+              worker.postMessage({ kind: WorkerMessageKind.Stop });
             })
         )
       );
     }
   };
+}
+
+async function resolveConfiguration(options?: { configuration?: Configuration }): Promise<Configuration> {
+  const baseConfiguration = options?.configuration || loadConfiguration();
+  await openSecureStorage(baseConfiguration.storageDirectory);
+  if (options?.configuration) {
+    return options.configuration;
+  }
+  const storedSettings = await new SettingsRepository(baseConfiguration.storageDirectory).read();
+  if (!storedSettings.listenersSaved) {
+    return baseConfiguration;
+  }
+  return configurationWithListeners(baseConfiguration, storedSettings.listeners);
 }
