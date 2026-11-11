@@ -191,6 +191,12 @@ export interface ServerSettings {
   publicHostname: string;
   secureWeb: boolean;
   relay: RelaySettings;
+  limits?: {
+    maximumMessageBytes: number;
+    mailboxQuotaBytes: number;
+    maximumUnauthenticatedConnections: number;
+    maximumUnauthenticatedMessages: number;
+  };
 }
 
 export interface CertificateDescription {
@@ -201,4 +207,6 @@ export interface CertificateDescription {
   validUntil: string;
   selfSigned: boolean;
   intermediateCount?: number;
+  daysRemaining?: number;
+  renewalRequired?: boolean;
 }

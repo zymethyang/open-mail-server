@@ -143,21 +143,22 @@ export async function authenticateInboundMessage(
   const fromDomain = domainOfAddress(headerValue(header, "from").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] || envelopeAddress);
   const envelopeDomain = domainOfAddress(envelopeAddress) || fromDomain;
   const senderPolicy = envelopeDomain ? await evaluateSenderPolicy(envelopeDomain, remoteAddress, lookup) : "none";
-  if (senderPolicy === "temperror" || senderPolicy === "permerror") {
-    return { disposition: InboundDisposition.Accept, detail: "The sender policy could not be checked" };
-  }
   const signatures = await passingSignatureDomains(message, lookup);
-  if (signatures === "temperror") {
-    return { disposition: InboundDisposition.Accept, detail: "The message signature could not be checked" };
-  }
   const policy = fromDomain ? await senderPolicyRecord(fromDomain, lookup) : "none";
-  if (policy === "temperror" || policy === "none") {
-    return { disposition: InboundDisposition.Accept, detail: "No sender policy requested rejection" };
+  if (policy === "temperror") {
+    return { disposition: InboundDisposition.Defer, detail: "The sender policy could not be checked" };
   }
-  const requested = tag(policy, "p").toLowerCase();
+  const requested = policy === "none" ? "" : tag(policy, "p").toLowerCase();
+  const checkFailed = senderPolicy === "temperror" || senderPolicy === "permerror" || signatures === "temperror";
+  if (checkFailed && (requested === "reject" || requested === "quarantine")) {
+    return { disposition: InboundDisposition.Defer, detail: "The sender policy could not be checked" };
+  }
+  if (policy === "none" || checkFailed || (requested !== "reject" && requested !== "quarantine")) {
+    return { disposition: InboundDisposition.Accept, detail: policy === "none" ? "No sender policy requested rejection" : "The sender policy passed" };
+  }
   const senderAligned = senderPolicy === "pass" && domainsAlign(envelopeDomain, fromDomain);
   const signatureAligned = signatures.some((domain) => domainsAlign(domain, fromDomain));
-  if (senderAligned || signatureAligned || (requested !== "reject" && requested !== "quarantine")) {
+  if (senderAligned || signatureAligned) {
     return { disposition: InboundDisposition.Accept, detail: "The sender policy passed" };
   }
   if (requested === "reject") {

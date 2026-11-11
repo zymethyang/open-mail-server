@@ -36,6 +36,11 @@ describe("message repository interface", { concurrency: 1 }, () => {
         listed.map((message) => message.subject),
         ["First", "Second"]
       );
+      assert.equal(listed[0].rawEncoded, "");
+      assert.equal(listed[0].text, "");
+      assert.equal(listed[0].attachments.length, 0);
+      assert.equal(listed[0].rawSize, first.rawSize);
+      assert.equal(await repository.mailboxSize("ada@acme.test"), first.rawSize + second.rawSize);
 
       const updated = await repository.updateMessage("ada@acme.test", "inbox", first.identifier, {
         seen: true,
@@ -45,8 +50,10 @@ describe("message repository interface", { concurrency: 1 }, () => {
       assert.equal(updated.seen, true);
       assert.equal(updated.subject, "Seen");
       assert.equal(updated.identifier, first.identifier);
-      assert.equal(updated.rawEncoded, first.rawEncoded);
-      assert.equal((await repository.readMessage("ada@acme.test", "inbox", first.identifier)).subject, "Seen");
+      assert.equal(updated.rawEncoded, "");
+      const stored = await repository.readMessage("ada@acme.test", "inbox", first.identifier);
+      assert.equal(stored.subject, "Seen");
+      assert.equal(stored.rawEncoded, first.rawEncoded);
 
       const moved = await repository.moveMessage("ada@acme.test", "inbox", "trash", second.identifier);
       assert.equal(moved.folderName, "trash");
@@ -75,23 +82,26 @@ describe("message repository interface", { concurrency: 1 }, () => {
     const storageDirectory = await createTemporaryStorage();
     const repository: MessageRepositoryContract = new MessageRepository(storageDirectory, new MailboxEvents());
     try {
-      const created = await repository.createFolder("ada@acme.test", "Project Files");
-      assert.equal(created.storageName, "project-files");
-      assert.equal(created.permanent, false);
-      await assert.rejects(() => repository.createFolder("ada@acme.test", "Project Files"), (error: unknown) => statusCodeOf(error) === 400);
-      await assert.rejects(() => repository.createFolder("ada@acme.test", "!!!"), (error: unknown) => statusCodeOf(error) === 400);
+      const created = await repository.createFolder("ada@acme.test", "Clients/Smith");
+      assert.equal(created.storageName, "Clients%2FSmith");
+      assert.equal(created.displayName, "Clients/Smith");
+      const other = await repository.createFolder("ada@acme.test", "Clients-Smith");
+      assert.equal(other.storageName, "Clients-Smith");
+      assert.notEqual(created.storageName, other.storageName);
+      await assert.rejects(() => repository.createFolder("ada@acme.test", "Clients/Smith"), (error: unknown) => statusCodeOf(error) === 400);
+      await assert.rejects(() => repository.createFolder("ada@acme.test", " "), (error: unknown) => statusCodeOf(error) === 400);
       await assert.rejects(() => repository.deleteFolder("ada@acme.test", "INBOX"), (error: unknown) => statusCodeOf(error) === 400);
       await assert.rejects(() => repository.renameFolder("ada@acme.test", "INBOX", "Archive"), (error: unknown) => statusCodeOf(error) === 400);
 
-      const renamed = await repository.renameFolder("ada@acme.test", "Project Files", "Archive");
-      assert.equal(renamed.storageName, "archive");
+      const renamed = await repository.renameFolder("ada@acme.test", "Clients/Smith", "Archive");
+      assert.equal(renamed.storageName, "Archive");
       assert.equal(renamed.displayName, "Archive");
       await repository.setSubscription("ada@acme.test", "Archive", false);
-      assert.equal((await repository.mailboxState("ada@acme.test")).subscriptions.includes("archive"), false);
-      await repository.setSubscription("ada@acme.test", "archive", true);
-      assert.equal((await repository.mailboxState("ada@acme.test")).subscriptions.includes("archive"), true);
+      assert.equal((await repository.mailboxState("ada@acme.test")).subscriptions.includes("Archive"), false);
+      await repository.setSubscription("ada@acme.test", "Archive", true);
+      assert.equal((await repository.mailboxState("ada@acme.test")).subscriptions.includes("Archive"), true);
       await repository.deleteFolder("ada@acme.test", "Archive");
-      assert.equal((await repository.listFolders("ada@acme.test")).some((folder) => folder.storageName === "archive"), false);
+      assert.equal((await repository.listFolders("ada@acme.test")).some((folder) => folder.storageName === "Archive"), false);
     } finally {
       await removeTemporaryStorage(storageDirectory);
     }

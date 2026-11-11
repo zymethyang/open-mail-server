@@ -1,5 +1,6 @@
 export enum InboundDisposition {
   Accept = "accept",
   Quarantine = "quarantine",
-  Reject = "reject"
+  Reject = "reject",
+  Defer = "defer"
 }

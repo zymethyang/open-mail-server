@@ -5,6 +5,7 @@ import tls from "node:tls";
 import type { CertificateDescription } from "../interfaces/certificateDescription.js";
 import type { ParsedCertificate } from "../interfaces/parsedCertificate.js";
 import type { PreparedCertificate } from "../interfaces/preparedCertificate.js";
+import { certificateRenewal } from "./renewal.js";
 
 const maximumPemCharacters = 64 * 1024;
 
@@ -134,7 +135,8 @@ export function prepareCertificateMaterial(certificatePem: string, privateKeyPem
         validUntil: leaf.certificate.validTo,
         names: certificateNames(leaf.certificate),
         selfSigned: isTrustAnchor(leaf.certificate),
-        intermediateCount: served.length - 1
+        intermediateCount: served.length - 1,
+        ...certificateRenewal(leaf.certificate.validTo)
       },
       certificate,
       privateKey

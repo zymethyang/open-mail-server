@@ -5,12 +5,13 @@ const administratorDestinations: ConsoleDestination[] = [
   { href: "#logs", label: "Logs", iconPath: "icons/logs.svg" },
   { href: "#failed-email", label: "Failed email", iconPath: "icons/failed.svg" },
   { href: "#users", label: "User management", iconPath: "icons/people.svg" },
+  { href: "#addresses", label: "Addresses", iconPath: "icons/addresses.svg" },
   { href: "#settings", label: "Settings", iconPath: "icons/settings.svg" }
 ];
 
 const mailboxDestination: ConsoleDestination = { href: "#mailbox", label: "My mailbox", iconPath: "icons/mail.svg" };
 
-const administratorRouteNames = new Set(["overview", "attention", "logs", "failed-email", "users", "mailboxes", "settings"]);
+const administratorRouteNames = new Set(["overview", "attention", "logs", "failed-email", "users", "mailboxes", "addresses", "settings"]);
 
 export function navigationEntries(role: string): ConsoleDestination[] {
   if (role === "administrator") {

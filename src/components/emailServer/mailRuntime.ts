@@ -33,7 +33,7 @@ export function certificateNames(configuration: Configuration, publicHostname: s
 
 export async function ensureMailCertificate(configuration: Configuration): Promise<ServerCertificate> {
   await openSecureStorage(configuration.storageDirectory);
-  const settingsRepository = new SettingsRepository(configuration.storageDirectory);
+  const settingsRepository = new SettingsRepository(configuration.storageDirectory, configuration.maximumMessageBytes);
   const organizationRepository = new OrganizationRepository(configuration.storageDirectory);
   const storedSettings = await settingsRepository.read();
   const organization = await organizationRepository.read();
@@ -50,7 +50,7 @@ export async function createMailRuntime(input: {
   const configuration = input.configuration;
   await openSecureStorage(configuration.storageDirectory);
   const accountRepository = new AccountRepository(configuration.storageDirectory);
-  const settingsRepository = new SettingsRepository(configuration.storageDirectory);
+  const settingsRepository = new SettingsRepository(configuration.storageDirectory, configuration.maximumMessageBytes);
   const organizationRepository = new OrganizationRepository(configuration.storageDirectory);
   const mailboxEvents = new MailboxEvents();
   const messageRepository = new MessageRepository(configuration.storageDirectory, mailboxEvents);
@@ -79,6 +79,7 @@ export async function createMailRuntime(input: {
     serverDomain: signingDomain,
     announceName: serverName,
     readRelay: () => settingsRepository.read().then((settings) => settings.relay),
+    maximumMessageBytes: configuration.maximumMessageBytes,
     signOutgoingMessage: createOutgoingSigner(configuration.storageDirectory, signingDomain),
     mailAuthenticationLookup: dnsMailAuthenticationLookup()
   });

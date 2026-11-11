@@ -5,6 +5,7 @@ import http from "node:http";
 import https from "node:https";
 import path from "node:path";
 import tls from "node:tls";
+import { maximumConfigurableMessageBytes } from "../configuration/constants/serverDefaults.js";
 import { contentTypes } from "./constants/contentTypes.js";
 import type { Configuration } from "../configuration/index.js";
 import { HttpError } from "../httpError/index.js";
@@ -24,8 +25,10 @@ import type { DeliveryService } from "../delivery/interfaces/delivery.js";
 import { checkPublicPorts } from "../publicPort/index.js";
 import type { OrganizationRecord } from "../organization/interfaces/organizationRecord.js";
 import { openDomainKey } from "../domainKey/index.js";
-import { createDnsGuide, formatDnsGuideForTerminal } from "./utils/dnsGuide.js";
 import { consoleAllowsVisitor } from "./utils/consoleVisitor.js";
+import { createDnsGuide, formatDnsGuideForTerminal } from "./utils/dnsGuide.js";
+import { AddressRouteRepository } from "../addressRoute/index.js";
+import { createStorageBackup } from "../backup/index.js";
 import { displayedImageType } from "./utils/displayedImageType.js";
 import { createMessageIdentifier, createRawMessage, parseRawMessage, sanitizeMessageHtml, type OutboundAttachment } from "../mime/index.js";
 import { createSnippet } from "../mime/index.js";
@@ -82,7 +85,7 @@ async function readJsonBody(request: http.IncomingMessage): Promise<Record<strin
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buffer.length;
-    if (size > 26 * 1024 * 1024) {
+    if (size > maximumConfigurableMessageBytes * 2) {
       throw new HttpError(413, "Request is too large");
     }
     chunks.push(buffer);
@@ -206,6 +209,31 @@ function textValue(value: unknown): string {
   return String(value ?? "");
 }
 
+function limitsFromBody(value: unknown): {
+  maximumMessageBytes?: number;
+  mailboxQuotaBytes?: number;
+  maximumUnauthenticatedConnections?: number;
+  maximumUnauthenticatedMessages?: number;
+} | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const limits: {
+    maximumMessageBytes?: number;
+    mailboxQuotaBytes?: number;
+    maximumUnauthenticatedConnections?: number;
+    maximumUnauthenticatedMessages?: number;
+  } = {};
+  for (const name of ["maximumMessageBytes", "mailboxQuotaBytes", "maximumUnauthenticatedConnections", "maximumUnauthenticatedMessages"] as const) {
+    if (record[name] === undefined || record[name] === "") {
+      continue;
+    }
+    limits[name] = Number(record[name]);
+  }
+  return Object.keys(limits).length ? limits : undefined;
+}
+
 function readOutboundAttachments(value: unknown, maximumBytes: number): OutboundAttachment[] {
   if (!Array.isArray(value) || !value.length) {
     return [];
@@ -259,7 +287,7 @@ function summary(record: MessageRecord) {
     answered: Boolean(record.answered),
     flagged: Boolean(record.flagged),
     draft: Boolean(record.draft),
-    snippet: createSnippet(record.text || ""),
+    snippet: record.snippet || createSnippet(record.text || ""),
     attachmentNames: (record.attachments || [])
       .filter((attachment) => !attachment.contentIdentifier || !(record.html || "").includes(attachment.contentIdentifier))
       .map((attachment) => attachment.fileName)
@@ -281,7 +309,7 @@ function requireAdministrator(context: ServerRequest): PublicAccount {
   return account;
 }
 
-const companyApiPrefixes = [ApiEndpoint.Activity, ApiEndpoint.FailedEmail, ApiEndpoint.Mailboxes, ApiEndpoint.Settings, ApiEndpoint.Certificate];
+const companyApiPrefixes = [ApiEndpoint.Activity, ApiEndpoint.FailedEmail, ApiEndpoint.Mailboxes, ApiEndpoint.AddressRoutes, ApiEndpoint.Settings, ApiEndpoint.Certificate, ApiEndpoint.Backup];
 
 function companyApiPath(pathName: string): boolean {
   return companyApiPrefixes.some((prefix) => pathName === prefix || pathName.startsWith(`${prefix}/`));
@@ -304,6 +332,7 @@ export function createWebServer(dependencies: {
   readCertificate(): Promise<CertificateDescription>;
   replaceCertificate(certificatePem: string, privateKeyPem: string, intermediateCertificatesPem?: string): Promise<CertificateDescription>;
 }): http.Server | https.Server {
+  const addressRouteRepository = new AddressRouteRepository(dependencies.configuration.storageDirectory);
   async function hostingGuide(company: OrganizationRecord) {
     const hostname = (await dependencies.serverName()) || company.domain;
     const incoming = dependencies.listenerStatus.find((item) => item.name === "IMAP" && item.security === "TLS");
@@ -624,7 +653,8 @@ export function createWebServer(dependencies: {
           password: textValue(relayRecord.password),
           security: textValue(relayRecord.security) as RelaySecurity
         },
-        secureWeb: context.body.secureWeb === undefined ? undefined : context.body.secureWeb === true
+        secureWeb: context.body.secureWeb === undefined ? undefined : context.body.secureWeb === true,
+        limits: limitsFromBody(context.body.limits)
       });
       await dependencies.activityLogger.record({
         protocol: MailProtocol.Web,
@@ -639,6 +669,92 @@ export function createWebServer(dependencies: {
         detail: settings.relay.enabled ? "mail relay enabled" : "server settings saved"
       });
       sendJson(response, 200, { settings });
+      return true;
+    }
+
+    if (pathName === ApiEndpoint.AddressRoutes && request.method === "GET") {
+      requireAdministrator(context);
+      if (!organization) {
+        throw new HttpError(409, "Create the company first");
+      }
+      sendJson(response, 200, { companyDomain: organization.domain, routes: await addressRouteRepository.read() });
+      return true;
+    }
+
+    if (pathName.startsWith(ApiEndpoint.AddressRoutes)) {
+      requireAdministrator(context);
+      if (!organization) {
+        throw new HttpError(409, "Create the company first");
+      }
+      if (request.method !== "POST") {
+        throw new HttpError(404, "Not found");
+      }
+      const removing = context.body.remove === true;
+      if (pathName === ApiEndpoint.AddressRouteAliases) {
+        const address = normalizeAddress(textValue(context.body.address));
+        const mailboxAddress = normalizeAddress(textValue(context.body.mailboxAddress));
+        if (!removing && (await dependencies.accountRepository.exists(address))) {
+          throw new HttpError(400, `${address} is already a mailbox`);
+        }
+        if (!removing && !(await dependencies.accountRepository.exists(mailboxAddress))) {
+          throw new HttpError(400, `Mailbox ${mailboxAddress} does not exist`);
+        }
+        const routes = removing
+          ? await addressRouteRepository.removeAlias(textValue(context.body.address))
+          : await addressRouteRepository.addAlias({ address, mailboxAddress }, organization.domain);
+        sendJson(response, removing ? 200 : 201, { routes });
+        return true;
+      }
+      if (pathName === ApiEndpoint.AddressRouteLists) {
+        const mailboxAddresses = String(textValue(context.body.mailboxAddresses))
+          .split(/[,\s]+/)
+          .map((address) => normalizeAddress(address))
+          .filter(Boolean);
+        if (!removing) {
+          for (const mailboxAddress of mailboxAddresses) {
+            if (!(await dependencies.accountRepository.exists(mailboxAddress))) {
+              throw new HttpError(400, `Mailbox ${mailboxAddress} does not exist`);
+            }
+          }
+        }
+        const routes = removing
+          ? await addressRouteRepository.removeList(textValue(context.body.address))
+          : await addressRouteRepository.addList({ address: textValue(context.body.address), mailboxAddresses }, organization.domain);
+        sendJson(response, removing ? 200 : 201, { routes });
+        return true;
+      }
+      if (pathName === ApiEndpoint.AddressRouteDomains) {
+        const routes = removing
+          ? await addressRouteRepository.removeDomain(textValue(context.body.domain))
+          : await addressRouteRepository.addDomain(textValue(context.body.domain), organization.domain);
+        sendJson(response, removing ? 200 : 201, { routes });
+        return true;
+      }
+      if (pathName === ApiEndpoint.AddressRouteCatchAll) {
+        const mailboxAddress = normalizeAddress(textValue(context.body.mailboxAddress));
+        if (!removing && !(await dependencies.accountRepository.exists(mailboxAddress))) {
+          throw new HttpError(400, `Mailbox ${mailboxAddress} does not exist`);
+        }
+        const routes = removing
+          ? await addressRouteRepository.removeCatchAll(textValue(context.body.domain))
+          : await addressRouteRepository.addCatchAll({ domain: textValue(context.body.domain), mailboxAddress }, organization.domain);
+        sendJson(response, removing ? 200 : 201, { routes });
+        return true;
+      }
+      if (pathName === ApiEndpoint.AddressRouteBlocked) {
+        const routes = removing
+          ? await addressRouteRepository.removeBlockedSender(textValue(context.body.value))
+          : await addressRouteRepository.addBlockedSender(textValue(context.body.value));
+        sendJson(response, removing ? 200 : 201, { routes });
+        return true;
+      }
+      throw new HttpError(404, "Not found");
+    }
+
+    if (request.method === "POST" && pathName === ApiEndpoint.Backup) {
+      requireAdministrator(context);
+      const backupDirectory = await createStorageBackup(dependencies.configuration.storageDirectory);
+      sendJson(response, 201, { backupName: path.basename(backupDirectory) });
       return true;
     }
 
@@ -785,7 +901,7 @@ export function createWebServer(dependencies: {
           subject: textValue(context.body.subject),
           text: textValue(context.body.text),
           html: sanitizeMessageHtml(textValue(context.body.html)),
-          attachments: readOutboundAttachments(context.body.attachments, dependencies.configuration.maximumMessageBytes),
+          attachments: readOutboundAttachments(context.body.attachments, (await dependencies.settingsRepository.read()).limits.maximumMessageBytes),
           messageIdentifierHeader: createMessageIdentifier(domain),
           inReplyTo: textValue(context.body.inReplyTo),
           date: new Date()
@@ -823,7 +939,7 @@ export function createWebServer(dependencies: {
         subject: textValue(context.body.subject) || "(no subject)",
         text: textValue(context.body.text),
         html: sanitizeMessageHtml(textValue(context.body.html)),
-        attachments: readOutboundAttachments(context.body.attachments, dependencies.configuration.maximumMessageBytes),
+        attachments: readOutboundAttachments(context.body.attachments, (await dependencies.settingsRepository.read()).limits.maximumMessageBytes),
         messageIdentifierHeader: createMessageIdentifier(domain),
         inReplyTo: "",
         date: new Date()
@@ -863,15 +979,18 @@ export function createWebServer(dependencies: {
     if (request.method === "GET" && !identifier) {
       const search = (url.searchParams.get("search") || "").trim().toLowerCase();
       const messages = await dependencies.messageRepository.listMessages(account.address, folderName);
-      const visible = messages
-        .filter((message) => {
-          if (!search) {
-            return true;
-          }
-          return `${message.fromName} ${message.fromAddress} ${message.subject} ${message.text}`.toLowerCase().includes(search);
-        })
-        .reverse()
-        .map(summary);
+      const visible = [];
+      for (const message of [...messages].reverse()) {
+        const header = `${message.fromName} ${message.fromAddress} ${message.subject} ${message.snippet || ""}`.toLowerCase();
+        if (!search || header.includes(search)) {
+          visible.push(summary(message));
+          continue;
+        }
+        const stored = await dependencies.messageRepository.readMessage(account.address, folderName, message.identifier);
+        if (`${stored.text}`.toLowerCase().includes(search)) {
+          visible.push(summary(stored));
+        }
+      }
       sendJson(response, 200, { messages: visible });
       return true;
     }
@@ -950,6 +1069,12 @@ export function createWebServer(dependencies: {
       "default-src 'self'; connect-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'self'; frame-ancestors 'none'"
     );
     try {
+      const requestUrl = new URL(request.url || "/", `http://${request.headers.host || "127.0.0.1"}`);
+      if (request.method === "GET" && requestUrl.pathname === "/health") {
+        const failed = dependencies.listenerStatus.filter((listener) => !listener.started);
+        sendJson(response, failed.length ? 503 : 200, { ok: failed.length === 0, listeners: dependencies.listenerStatus });
+        return;
+      }
       const companyAccountExists = await dependencies.accountRepository.hasAccounts();
       if (!consoleAllowsVisitor(request.socket.remoteAddress || "", companyAccountExists)) {
         throw new HttpError(403, "Create the company from this machine before opening the console from another computer");

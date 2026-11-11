@@ -59,4 +59,5 @@ export interface DeliveryDependencies {
   readRelay: () => Promise<MailRelaySettings>;
   signOutgoingMessage?: (rawMessage: Buffer) => Promise<Buffer>;
   mailAuthenticationLookup?: MailAuthenticationLookup;
+  maximumMessageBytes?: number;
 }

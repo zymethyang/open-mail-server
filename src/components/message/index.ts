@@ -2,9 +2,10 @@ import { randomBytes } from "node:crypto";
 import { mkdir, readdir, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import type { MessageRepository as MessageRepositoryContract } from "./interfaces/messageRepository.js";
-import type { MailboxState, MailFolder, MessageDraft, MessageRecord } from "./interfaces/mailTypes.js";
+import type { MailboxState, MailFolder, MessageDraft, MessageRecord, MessageSummary } from "./interfaces/mailTypes.js";
 import { permanentFolders } from "./constants/permanentFolders.js";
 import { findFolder, isSafeStorageName, storageNameFromDisplay } from "./utils/folder.js";
+import { messageFromSummary, messageSummary, messageWithSummary } from "./utils/messageSummary.js";
 import type { MailboxEvents } from "../mailboxEvents/interfaces/mailboxEvents.js";
 import { normalizeAddress } from "../text/index.js";
 import { withLock } from "../jsonFile/index.js";
@@ -99,7 +100,7 @@ function createMessageRepository(storageDirectory: string, events: MailboxEvents
     const fileNames = await readdir(directory);
     const records: MessageRecord[] = [];
     for (const fileName of fileNames) {
-      if (!fileName.endsWith(".json")) {
+      if (!fileName.endsWith(".json") || fileName === "index.json") {
         continue;
       }
       try {
@@ -116,6 +117,31 @@ function createMessageRepository(storageDirectory: string, events: MailboxEvents
   async function writeRecord(address: string, storageName: string, record: MessageRecord): Promise<void> {
     const filePath = path.join(folderDirectory(address, storageName), `${record.identifier}.json`);
     await writeJson(filePath, record);
+  }
+
+  function indexPath(address: string, storageName: string): string {
+    return path.join(folderDirectory(address, storageName), "index.json");
+  }
+
+  async function readIndex(address: string, storageName: string): Promise<MessageSummary[]> {
+    try {
+      const stored = await readJson<MessageSummary[]>(indexPath(address, storageName));
+      if (Array.isArray(stored)) {
+        return stored;
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+    }
+    const records = await listRecords(address, storageName);
+    const summaries = records.map((record) => messageSummary(record));
+    await writeJson(indexPath(address, storageName), summaries);
+    return summaries;
+  }
+
+  async function writeIndex(address: string, storageName: string, summaries: MessageSummary[]): Promise<void> {
+    await writeJson(indexPath(address, storageName), summaries);
   }
 
   return {
@@ -138,7 +164,25 @@ function createMessageRepository(storageDirectory: string, events: MailboxEvents
       return withLock(lockName(address), async () => {
         const state = await readState(address);
         const folder = requireFolder(state, folderName);
-        return listRecords(address, folder.storageName);
+        const summaries = await readIndex(address, folder.storageName);
+        return summaries.map((summary) => messageFromSummary(summary));
+      });
+    },
+
+    async mailboxSize(address) {
+      return withLock(lockName(address), async () => {
+        const state = await readState(address);
+        let total = 0;
+        for (const folder of state.folders) {
+          if (!isSafeStorageName(folder.storageName)) {
+            continue;
+          }
+          const summaries = await readIndex(address, folder.storageName);
+          for (const summary of summaries) {
+            total += summary.rawSize || 0;
+          }
+        }
+        return total;
       });
     },
 
@@ -149,8 +193,14 @@ function createMessageRepository(storageDirectory: string, events: MailboxEvents
         if (!/^[a-f0-9]{24}$/.test(identifier)) {
           folderError("Message not found");
         }
+        const summaries = await readIndex(address, folder.storageName);
+        const summary = summaries.find((item) => item.identifier === identifier);
+        if (!summary) {
+          folderError("Message not found");
+        }
         try {
-          return await readJson<MessageRecord>(path.join(folderDirectory(address, folder.storageName), `${identifier}.json`));
+          const record = await readJson<MessageRecord>(path.join(folderDirectory(address, folder.storageName), `${identifier}.json`));
+          return messageWithSummary(record, summary);
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code === "ENOENT") {
             folderError("Message not found");
@@ -174,7 +224,10 @@ function createMessageRepository(storageDirectory: string, events: MailboxEvents
           uniqueIdentifier,
           folderName: folder.storageName
         };
+        const summaries = await readIndex(address, folder.storageName);
         await writeRecord(address, folder.storageName, stored);
+        summaries.push(messageSummary(stored));
+        await writeIndex(address, folder.storageName, summaries);
         return stored;
       });
       events.publish({ address: normalizeAddress(address), folderStorageName: record.folderName });
@@ -188,27 +241,24 @@ function createMessageRepository(storageDirectory: string, events: MailboxEvents
         if (!/^[a-f0-9]{24}$/.test(identifier)) {
           folderError("Message not found");
         }
-        const filePath = path.join(folderDirectory(address, folder.storageName), `${identifier}.json`);
-        let current: MessageRecord;
-        try {
-          current = await readJson<MessageRecord>(filePath);
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-            folderError("Message not found");
-          }
-          throw error;
+        const summaries = await readIndex(address, folder.storageName);
+        const summaryIndex = summaries.findIndex((item) => item.identifier === identifier);
+        if (summaryIndex < 0) {
+          folderError("Message not found");
         }
-        const updated: MessageRecord = {
-          ...current,
+        const current = summaries[summaryIndex];
+        const updatedSummary = messageSummary({
+          ...messageFromSummary(current),
           ...changes,
           identifier: current.identifier,
           uniqueIdentifier: current.uniqueIdentifier,
           folderName: folder.storageName,
-          rawEncoded: current.rawEncoded,
+          rawEncoded: "",
           rawSize: current.rawSize
-        };
-        await writeRecord(address, folder.storageName, updated);
-        return updated;
+        });
+        summaries[summaryIndex] = updatedSummary;
+        await writeIndex(address, folder.storageName, summaries);
+        return messageFromSummary(updatedSummary);
       });
       events.publish({ address: normalizeAddress(address), folderStorageName: next.folderName });
       return next;
@@ -218,12 +268,16 @@ function createMessageRepository(storageDirectory: string, events: MailboxEvents
       const folderStorageName = await withLock(lockName(address), async () => {
         const state = await readState(address);
         const folder = requireFolder(state, folderName);
-        for (const identifier of identifiers) {
-          if (!/^[a-f0-9]{24}$/.test(identifier)) {
-            continue;
-          }
+        const removed = new Set(identifiers.filter((identifier) => /^[a-f0-9]{24}$/.test(identifier)));
+        for (const identifier of removed) {
           await rm(path.join(folderDirectory(address, folder.storageName), `${identifier}.json`), { force: true });
         }
+        const summaries = await readIndex(address, folder.storageName);
+        await writeIndex(
+          address,
+          folder.storageName,
+          summaries.filter((summary) => !removed.has(summary.identifier))
+        );
         return folder.storageName;
       });
       events.publish({ address: normalizeAddress(address), folderStorageName });
@@ -250,6 +304,8 @@ function createMessageRepository(storageDirectory: string, events: MailboxEvents
         const uniqueIdentifier = state.nextUniqueIdentifier;
         state.nextUniqueIdentifier += 1;
         await writeJson(statePath(address), state);
+        const sourceSummaries = await readIndex(address, fromFolder.storageName);
+        const destinationSummaries = await readIndex(address, toFolder.storageName);
         const next: MessageRecord = {
           ...current,
           uniqueIdentifier,
@@ -257,6 +313,13 @@ function createMessageRepository(storageDirectory: string, events: MailboxEvents
           deleted: false
         };
         await writeRecord(address, toFolder.storageName, next);
+        await writeIndex(
+          address,
+          fromFolder.storageName,
+          sourceSummaries.filter((summary) => summary.identifier !== identifier)
+        );
+        destinationSummaries.push(messageSummary(next));
+        await writeIndex(address, toFolder.storageName, destinationSummaries);
         await rm(sourcePath, { force: true });
         return { message: next, sourceFolderName: fromFolder.storageName };
       });
@@ -276,8 +339,8 @@ function createMessageRepository(storageDirectory: string, events: MailboxEvents
         }
         const folder: MailFolder = {
           storageName,
-          displayName: displayName.trim().slice(0, 80),
-          label: displayName.trim().slice(0, 80),
+          displayName: displayName.trim(),
+          label: displayName.trim(),
           permanent: false,
           specialUse: ""
         };
@@ -319,7 +382,7 @@ function createMessageRepository(storageDirectory: string, events: MailboxEvents
           await rename(folderDirectory(address, previousStorageName), folderDirectory(address, nextStorageName));
         }
         folder.storageName = nextStorageName;
-        folder.displayName = nextDisplayName.trim().slice(0, 80);
+        folder.displayName = nextDisplayName.trim();
         folder.label = folder.displayName;
         state.subscriptions = state.subscriptions.map((item) => (item === previousStorageName ? nextStorageName : item));
         await writeJson(statePath(address), state);
@@ -365,6 +428,10 @@ export class MessageRepository implements MessageRepositoryContract {
 
   listMessages(address: string, folderName: string) {
     return this.repository.listMessages(address, folderName);
+  }
+
+  mailboxSize(address: string) {
+    return this.repository.mailboxSize(address);
   }
 
   readMessage(address: string, folderName: string, identifier: string) {

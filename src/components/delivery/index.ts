@@ -13,6 +13,10 @@ import { domainOf, normalizeAddress } from "../text/index.js";
 import { deliverToExchange, type SubmissionRelay } from "../outboundMail/index.js";
 import { createMessageIdentifier, createRawMessage, createStoredMessage, parseRawMessage, senderMailboxAddresses } from "../mime/index.js";
 import { ActivityAction } from "../activity/enums/activityAction.js";
+import { AddressRouteRepository } from "../addressRoute/index.js";
+import { blockedSenderDetail, resolveDeliveryAddress } from "../addressRoute/utils/resolveDeliveryAddress.js";
+import { inspectMessageContent } from "../messageFilter/utils/contentInspection.js";
+import { SettingsRepository } from "../settings/index.js";
 import { ActivityResult } from "../activity/enums/activityResult.js";
 import { MailFolderName } from "../message/enums/mailFolderName.js";
 import { MailProtocol } from "../protocol/enums/mailProtocol.js";
@@ -44,6 +48,8 @@ function assertSignedInSender(rawBuffer: Buffer, envelopeAddress: string, authen
 function createDeliveryService(dependencies: DeliveryDependencies): DeliveryServiceContract {
   const queueDirectory = path.join(dependencies.storageDirectory, "outbound-queue");
   const mailAuthenticationLookup = dependencies.mailAuthenticationLookup || emptyMailAuthenticationLookup();
+  const addressRoutes = new AddressRouteRepository(dependencies.storageDirectory);
+  const settingsRepository = new SettingsRepository(dependencies.storageDirectory, dependencies.maximumMessageBytes);
 
   async function writeQueue(item: QueuedDelivery): Promise<void> {
     await writeJson(queuedFilePath(item.identifier), item);
@@ -266,22 +272,42 @@ function createDeliveryService(dependencies: DeliveryDependencies): DeliveryServ
         throw deliveryError("Empty message");
       }
       assertSignedInSender(request.rawBuffer, envelopeFrom, request.authenticatedAddress);
+      const limits = (await settingsRepository.read()).limits;
+      if (request.rawBuffer.length > limits.maximumMessageBytes) {
+        throw deliveryError("The message is too large", 552);
+      }
+      const routes = await addressRoutes.read();
+      if (!request.authenticatedAddress) {
+        const blocked = blockedSenderDetail(routes, envelopeFrom, request.remoteAddress);
+        if (blocked) {
+          throw deliveryError(blocked);
+        }
+        const rejectedContent = inspectMessageContent(request.rawBuffer);
+        if (rejectedContent) {
+          throw deliveryError(rejectedContent);
+        }
+      }
       const localRecipients: string[] = [];
       const externalRecipients: string[] = [];
       const missingRecipients: string[] = [];
       for (const recipient of recipients) {
-        if (domainOf(recipient) === domain) {
-          if (await dependencies.accountRepository.exists(recipient)) {
-            localRecipients.push(recipient);
-          } else {
-            missingRecipients.push(recipient);
+        const resolution = await resolveDeliveryAddress(recipient, domain, routes, (mailboxAddress) => dependencies.accountRepository.exists(mailboxAddress));
+        if (resolution.kind === "external") {
+          if (!request.authenticatedAddress) {
+            throw deliveryError("Relay denied");
           }
+          externalRecipients.push(recipient);
           continue;
         }
-        if (!request.authenticatedAddress) {
-          throw deliveryError("Relay denied");
+        if (resolution.kind === "missing") {
+          missingRecipients.push(recipient);
+          continue;
         }
-        externalRecipients.push(recipient);
+        for (const mailboxAddress of resolution.mailboxAddresses) {
+          if (!localRecipients.includes(mailboxAddress)) {
+            localRecipients.push(mailboxAddress);
+          }
+        }
       }
       if (missingRecipients.length && !request.bounceMissingMailboxes) {
         if (missingRecipients.length === 1) {
@@ -289,12 +315,21 @@ function createDeliveryService(dependencies: DeliveryDependencies): DeliveryServ
         }
         throw deliveryError(`Mailboxes ${missingRecipients.join(", ")} do not exist`);
       }
+      for (const mailboxAddress of localRecipients) {
+        const used = await dependencies.messageRepository.mailboxSize(mailboxAddress);
+        if (used + request.rawBuffer.length > limits.mailboxQuotaBytes) {
+          throw deliveryError(`Mailbox ${mailboxAddress} is over its quota`, 552);
+        }
+      }
 
       let destinationFolder = MailFolderName.Inbox;
       if (!request.authenticatedAddress && localRecipients.length) {
         const verdict = await authenticateInboundMessage(request.rawBuffer, envelopeFrom, request.remoteAddress, mailAuthenticationLookup);
         if (verdict.disposition === InboundDisposition.Reject) {
           throw deliveryError(verdict.detail);
+        }
+        if (verdict.disposition === InboundDisposition.Defer) {
+          throw deliveryError(verdict.detail, 451);
         }
         if (verdict.disposition === InboundDisposition.Quarantine) {
           destinationFolder = MailFolderName.Junk;

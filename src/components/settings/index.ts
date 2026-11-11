@@ -1,8 +1,16 @@
 import path from "node:path";
-import { defaultBindHost, defaultSecureWeb } from "../configuration/constants/serverDefaults.js";
+import {
+  defaultBindHost,
+  defaultMailboxQuotaBytes,
+  defaultMaximumMessageBytes,
+  defaultMaximumUnauthenticatedConnections,
+  defaultMaximumUnauthenticatedMessages,
+  defaultSecureWeb,
+  maximumConfigurableMessageBytes
+} from "../configuration/constants/serverDefaults.js";
 import { ServerPort } from "../configuration/enums/serverPort.js";
 import { RelaySecurity } from "./enums/relaySecurity.js";
-import type { ListenerSettings, ServerSettings, SettingsRepository as SettingsRepositoryContract } from "./interfaces/settings.js";
+import type { ListenerSettings, ServerSettings, SettingsRepository as SettingsRepositoryContract, StorageLimits } from "./interfaces/settings.js";
 import { readJson, writeJson } from "../jsonFile/index.js";
 import { withLock } from "../jsonFile/index.js";
 
@@ -21,7 +29,38 @@ function defaultListeners(): ListenerSettings {
   };
 }
 
-function emptySettings(): ServerSettings {
+function defaultLimits(fallbackMaximumMessageBytes = defaultMaximumMessageBytes): StorageLimits {
+  const maximumMessageBytes = boundedInteger(fallbackMaximumMessageBytes, defaultMaximumMessageBytes, 1024, maximumConfigurableMessageBytes);
+  return {
+    maximumMessageBytes,
+    mailboxQuotaBytes: Math.max(defaultMailboxQuotaBytes, maximumMessageBytes),
+    maximumUnauthenticatedConnections: defaultMaximumUnauthenticatedConnections,
+    maximumUnauthenticatedMessages: defaultMaximumUnauthenticatedMessages
+  };
+}
+
+function boundedInteger(value: unknown, fallback: number, minimum: number, maximum: number): number {
+  const number = Number(value);
+  if (!Number.isInteger(number)) {
+    return fallback;
+  }
+  return Math.min(maximum, Math.max(minimum, number));
+}
+
+function storedLimits(value: Partial<StorageLimits> | undefined, fallbackMaximumMessageBytes = defaultMaximumMessageBytes): StorageLimits {
+  const defaults = defaultLimits(fallbackMaximumMessageBytes);
+  return {
+    maximumMessageBytes: boundedInteger(value?.maximumMessageBytes, defaults.maximumMessageBytes, 1024, maximumConfigurableMessageBytes),
+    mailboxQuotaBytes: Math.max(
+      boundedInteger(value?.mailboxQuotaBytes, defaults.mailboxQuotaBytes, 1024, 100 * 1024 * 1024 * 1024),
+      boundedInteger(value?.maximumMessageBytes, defaults.maximumMessageBytes, 1024, maximumConfigurableMessageBytes)
+    ),
+    maximumUnauthenticatedConnections: boundedInteger(value?.maximumUnauthenticatedConnections, defaults.maximumUnauthenticatedConnections, 1, 500),
+    maximumUnauthenticatedMessages: boundedInteger(value?.maximumUnauthenticatedMessages, defaults.maximumUnauthenticatedMessages, 1, 1000)
+  };
+}
+
+function emptySettings(fallbackMaximumMessageBytes = defaultMaximumMessageBytes): ServerSettings {
   return {
     publicHostname: "",
     relay: {
@@ -33,7 +72,8 @@ function emptySettings(): ServerSettings {
       security: RelaySecurity.StartTls
     },
     listeners: defaultListeners(),
-    listenersSaved: false
+    listenersSaved: false,
+    limits: defaultLimits(fallbackMaximumMessageBytes)
   };
 }
 
@@ -76,13 +116,13 @@ function requireSecureRelay(port: number, security: string): { port: number; sec
   return relay;
 }
 
-function createSettingsRepository(storageDirectory: string): SettingsRepositoryContract {
+function createSettingsRepository(storageDirectory: string, fallbackMaximumMessageBytes = defaultMaximumMessageBytes): SettingsRepositoryContract {
   const filePath = path.join(storageDirectory, "settings.json");
 
   async function readUnlocked(): Promise<ServerSettings> {
     try {
       const stored = await readJson<Partial<ServerSettings>>(filePath);
-      const relay = stored.relay || emptySettings().relay;
+      const relay = stored.relay || emptySettings(fallbackMaximumMessageBytes).relay;
       const listenersSaved = stored.listenersSaved === true;
       const secureRelay = matchingSecureRelay(Number(relay.port), String(relay.security || "")) || {
         port: ServerPort.SmtpSubmission,
@@ -99,11 +139,12 @@ function createSettingsRepository(storageDirectory: string): SettingsRepositoryC
           security: secureRelay.security
         },
         listeners: fixedListeners(),
-        listenersSaved
+        listenersSaved,
+        limits: storedLimits(stored.limits, fallbackMaximumMessageBytes)
       };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return emptySettings();
+        return emptySettings(fallbackMaximumMessageBytes);
       }
       throw error;
     }
@@ -125,7 +166,8 @@ function createSettingsRepository(storageDirectory: string): SettingsRepositoryC
           security: settings.relay.security,
           passwordSaved: Boolean(settings.relay.password)
         },
-        secureWeb: settings.listeners.secureWeb
+        secureWeb: settings.listeners.secureWeb,
+        limits: settings.limits
       };
     },
 
@@ -150,7 +192,8 @@ function createSettingsRepository(storageDirectory: string): SettingsRepositoryC
             security: relayConnection.security
           },
           listeners: fixedListeners(),
-          listenersSaved: input.secureWeb === undefined ? current.listenersSaved : true
+          listenersSaved: input.secureWeb === undefined ? current.listenersSaved : true,
+          limits: storedLimits({ ...current.limits, ...input.limits }, fallbackMaximumMessageBytes)
         };
         await writeJson(filePath, next);
         return repository.present(next);
@@ -164,8 +207,8 @@ function createSettingsRepository(storageDirectory: string): SettingsRepositoryC
 export class SettingsRepository implements SettingsRepositoryContract {
   private readonly repository: SettingsRepositoryContract;
 
-  constructor(storageDirectory: string) {
-    this.repository = createSettingsRepository(storageDirectory);
+  constructor(storageDirectory: string, fallbackMaximumMessageBytes = defaultMaximumMessageBytes) {
+    this.repository = createSettingsRepository(storageDirectory, fallbackMaximumMessageBytes);
   }
 
   read() {

@@ -176,7 +176,7 @@ async function resolveConfiguration(options?: { configuration?: Configuration })
   if (options?.configuration) {
     return options.configuration;
   }
-  const storedSettings = await new SettingsRepository(baseConfiguration.storageDirectory).read();
+  const storedSettings = await new SettingsRepository(baseConfiguration.storageDirectory, baseConfiguration.maximumMessageBytes).read();
   if (!storedSettings.listenersSaved) {
     return baseConfiguration;
   }

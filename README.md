@@ -21,7 +21,7 @@ This repository already includes `docker-compose.yml`. `NET_BIND_SERVICE` lets t
 ```yaml
 services:
   email-server:
-    image: zymethyang/open-mail-server:v1.1.0
+    image: zymethyang/open-mail-server:v1.2.0
     restart: unless-stopped
     cap_add:
       - NET_BIND_SERVICE

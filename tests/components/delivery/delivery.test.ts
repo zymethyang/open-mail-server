@@ -92,7 +92,9 @@ describe("delivery service", { concurrency: 1 }, () => {
       );
       assert.deepEqual(stored.localRecipients, ["ada@acme.test", "bea@acme.test"]);
       assert.equal(stored.externalRecipients.length, 0);
-      assert.equal((await local.messageRepository.listMessages("ada@acme.test", "inbox"))[0].text, "Hello from outside");
+      const storedMessage = await local.messageRepository.readMessage("ada@acme.test", "inbox", (await local.messageRepository.listMessages("ada@acme.test", "inbox"))[0].identifier);
+      assert.equal(storedMessage.text, "Hello from outside");
+      assert.equal((await local.messageRepository.listMessages("ada@acme.test", "inbox"))[0].rawEncoded, "");
       assert.equal((await local.messageRepository.listMessages("bea@acme.test", "inbox")).length, 1);
 
       const relayed = await local.deliveryService.deliver({
@@ -245,7 +247,7 @@ describe("delivery service", { concurrency: 1 }, () => {
       assert.deepEqual(returned.givenUp, [second.identifier]);
       assert.deepEqual(returned.stillWaiting, []);
       const inbox = await opened.messageRepository.listMessages("ada@acme.test", "inbox");
-      assert.equal(inbox.some((message) => message.subject === "Delivery failed" && message.text.includes("still down")), true);
+      assert.equal(inbox.some((message) => message.subject === "Delivery failed" && (message.snippet || "").includes("still down")), true);
       const events = await opened.activityLogger.query({ protocol: "", result: "", search: "Second failure", limit: 10 });
       assert.equal(events.some((event) => event.result === ActivityResult.Failed && event.subject === "Second failure"), true);
     } finally {
@@ -460,8 +462,8 @@ describe("delivery service", { concurrency: 1 }, () => {
       assert.equal(sent.length, 3);
       const inbox = await opened.messageRepository.listMessages("ada@acme.test", "inbox");
       assert.equal(inbox.filter((message) => message.subject === "Delivery failed").length, 3);
-      assert.equal(inbox.some((message) => message.text.includes("admin@acme.test is not a mailbox on this server.")), true);
-      assert.equal(inbox.some((message) => message.text.includes("admin@acme.test, acme@acme.test")), true);
+      assert.equal(inbox.some((message) => (message.snippet || "").includes("admin@acme.test is not a mailbox on this server.")), true);
+      assert.equal(inbox.some((message) => (message.snippet || "").includes("admin@acme.test, acme@acme.test")), true);
       const events = await opened.activityLogger.query({ protocol: "", result: ActivityResult.Failed, search: "admin@acme.test", limit: 10 });
       assert.equal(events.length, 3);
     } finally {
@@ -647,12 +649,15 @@ describe("delivery service", { concurrency: 1 }, () => {
         remoteAddress: "198.51.100.20",
         protocol: MailProtocol.Smtp
       });
-      await opened.deliveryService.deliver(deliveryRequest("ada@temperror.test", ["bea@acme.test"], "Lookup failed open"));
+      await assert.rejects(
+        () => opened.deliveryService.deliver(deliveryRequest("ada@temperror.test", ["bea@acme.test"], "Lookup could not be checked")),
+        (error: unknown) => statusCodeOf(error) === 451 && (error as Error).message.includes("could not be checked")
+      );
       const inbox = await opened.messageRepository.listMessages("bea@acme.test", "inbox");
-      assert.equal(inbox.filter((message) => message.text.includes("Published none")).length, 1);
-      assert.equal(inbox.filter((message) => message.text.includes("Aligned sender")).length, 1);
-      assert.equal(inbox.filter((message) => message.text.includes("Signed body")).length, 1);
-      assert.equal(inbox.filter((message) => message.text.includes("Lookup failed open")).length, 1);
+      assert.equal(inbox.filter((message) => (message.snippet || "").includes("Published none")).length, 1);
+      assert.equal(inbox.filter((message) => (message.snippet || "").includes("Aligned sender")).length, 1);
+      assert.equal(inbox.filter((message) => (message.snippet || "").includes("Signed body")).length, 1);
+      assert.equal(inbox.filter((message) => (message.snippet || "").includes("Lookup could not be checked")).length, 0);
     } finally {
       await sink.stop();
       await removeTemporaryStorage(storageDirectory);

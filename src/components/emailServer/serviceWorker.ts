@@ -121,7 +121,9 @@ async function startService(runtime: MailRuntime): Promise<void> {
         ...shared,
         endpoint: { port: runtime.configuration.smtpPort, secure: false, requireAuthentication: false },
         deliveryService: runtime.deliveryService,
-        serverName: runtime.serverName
+        serverName: runtime.serverName,
+        limitUnauthenticated: true,
+        readLimits: () => runtime.settingsRepository.read().then((settings) => settings.limits)
       }).start()
     );
     await remember({ name: "SMTP", port: runtime.configuration.smtpSecurePort, security: "TLS", purpose: "Send mail" }, () =>
@@ -129,7 +131,8 @@ async function startService(runtime: MailRuntime): Promise<void> {
         ...shared,
         endpoint: { port: runtime.configuration.smtpSecurePort, secure: true, requireAuthentication: true },
         deliveryService: runtime.deliveryService,
-        serverName: runtime.serverName
+        serverName: runtime.serverName,
+        readLimits: () => runtime.settingsRepository.read().then((settings) => settings.limits)
       }).start()
     );
     await remember({ name: "SMTP", port: runtime.configuration.smtpSubmissionPort, security: "STARTTLS", purpose: "Send mail" }, () =>
@@ -137,7 +140,8 @@ async function startService(runtime: MailRuntime): Promise<void> {
         ...shared,
         endpoint: { port: runtime.configuration.smtpSubmissionPort, secure: false, requireAuthentication: true },
         deliveryService: runtime.deliveryService,
-        serverName: runtime.serverName
+        serverName: runtime.serverName,
+        readLimits: () => runtime.settingsRepository.read().then((settings) => settings.limits)
       }).start()
     );
     return;

@@ -36,6 +36,9 @@ function certificateKind(certificate: CertificateDescription): string {
 
 function certificateMarkup(certificate: CertificateDescription): string {
   const names = certificate.names && certificate.names.length ? certificate.names.join(", ") : "None listed";
+  const renewal = certificate.renewalRequired
+    ? `<p class="hint">This certificate expires in ${certificate.daysRemaining ?? 0} days. A self-signed certificate is replaced automatically. An uploaded certificate needs a new file before it expires.</p>`
+    : "";
   return `<dl class="record-list">
     <div><dt>Subject</dt><dd>${escapeHtml(certificate.subject)}</dd></div>
     <div><dt>Issuer</dt><dd>${escapeHtml(certificate.issuer)}</dd></div>
@@ -43,7 +46,7 @@ function certificateMarkup(certificate: CertificateDescription): string {
     <div><dt>Valid from</dt><dd>${escapeHtml(presentCertificateDate(certificate.validFrom))}</dd></div>
     <div><dt>Valid until</dt><dd>${escapeHtml(presentCertificateDate(certificate.validUntil))}</dd></div>
     <div><dt>Kind</dt><dd>${escapeHtml(certificateKind(certificate))}</dd></div>
-  </dl>`;
+  </dl>${renewal}`;
 }
 
 function readTextFile(file: File): Promise<string> {
@@ -64,7 +67,7 @@ function relaySelection(): { port: number; security: string } {
 
 function settingsRequestBody(): string {
   const relay = relaySelection();
-  return JSON.stringify({
+    return JSON.stringify({
     publicHostname: element<HTMLInputElement>("#settings-hostname").value,
     relay: {
       enabled: element<HTMLInputElement>("#settings-relay-enabled").checked,
@@ -73,6 +76,12 @@ function settingsRequestBody(): string {
       security: relay.security,
       username: element<HTMLInputElement>("#settings-relay-username").value,
       password: element<HTMLInputElement>("#settings-relay-password").value
+    },
+    limits: {
+      maximumMessageBytes: Number(element<HTMLInputElement>("#settings-message-megabytes").value) * 1024 * 1024,
+      mailboxQuotaBytes: Number(element<HTMLInputElement>("#settings-quota-megabytes").value) * 1024 * 1024,
+      maximumUnauthenticatedConnections: Number(element<HTMLInputElement>("#settings-connection-limit").value),
+      maximumUnauthenticatedMessages: Number(element<HTMLInputElement>("#settings-message-limit").value)
     }
   });
 }
@@ -107,6 +116,19 @@ async function saveSettings(): Promise<void> {
 
 function bindCertificateCard(): void {
   const summary = element<HTMLElement>("#certificate-summary");
+  element<HTMLButtonElement>("#create-backup").addEventListener("click", () => {
+    summary.className = "notice";
+    summary.hidden = false;
+    summary.innerHTML = "<h2>Creating backup</h2><p>The mail store and storage key are being copied.</p>";
+    void requestJson<{ backupName: string }>(ApiEndpoint.Backup, { method: "POST", body: "{}" })
+      .then((payload) => {
+        summary.innerHTML = `<h2>Backup created</h2><p>Saved as ${escapeHtml(payload.backupName)}.</p>`;
+      })
+      .catch((error: unknown) => {
+        summary.className = "error-summary";
+        summary.innerHTML = `<h2>There is a problem</h2><p>${escapeHtml(errorMessage(error))}</p>`;
+      });
+  });
   const dialog = element<HTMLDialogElement>("#certificate-dialog");
   const dialogSummary = element<HTMLElement>("#certificate-dialog-summary");
   requestJson<{ certificate: CertificateDescription }>(ApiEndpoint.Certificate)
@@ -175,6 +197,9 @@ async function renderSettings(saved = false): Promise<void> {
   const settings = payload.settings;
   const relay = settings.relay;
   const secureRelaySelected = relay.port === ServerPort.SmtpSecure && relay.security === "tls";
+  const limits = settings.limits;
+  const messageMegabytes = limits ? Math.round(limits.maximumMessageBytes / (1024 * 1024)) : 25;
+  const quotaMegabytes = limits ? Math.round(limits.mailboxQuotaBytes / (1024 * 1024)) : 1024;
   const savedNotice = saved
     ? `<div class="notice"><h2>Settings saved</h2><p>The public name and relay apply now.</p></div>`
     : "";
@@ -187,6 +212,15 @@ async function renderSettings(saved = false): Promise<void> {
       <label for="settings-hostname">Hostname</label>
       <input id="settings-hostname" value="${escapeHtml(settings.publicHostname)}" placeholder="mail.example.com">
       <p class="hint">This name is used in the mail greeting and the DNS guide. Leave it empty to use the company domain.</p>
+      <h2>Storage limits</h2>
+      <label for="settings-message-megabytes">Maximum message size in megabytes</label>
+      <input id="settings-message-megabytes" type="number" min="1" max="48" value="${messageMegabytes}">
+      <label for="settings-quota-megabytes">Mailbox quota in megabytes</label>
+      <input id="settings-quota-megabytes" type="number" min="1" value="${quotaMegabytes}">
+      <label for="settings-connection-limit">Unauthenticated mail connections</label>
+      <input id="settings-connection-limit" type="number" min="1" max="500" value="${limits?.maximumUnauthenticatedConnections ?? 20}">
+      <label for="settings-message-limit">Unauthenticated messages per connection</label>
+      <input id="settings-message-limit" type="number" min="1" max="1000" value="${limits?.maximumUnauthenticatedMessages ?? 20}">
       ${fold(`Outgoing relay<span class="fold-status">${relay.enabled ? "On" : "Off"}</span>`, `<label class="choice" for="settings-relay-enabled"><input id="settings-relay-enabled" type="checkbox" ${relay.enabled ? "checked" : ""}> Send external mail through a relay</label>
       <label for="settings-relay-host">Relay host</label>
       <input id="settings-relay-host" value="${escapeHtml(relay.host)}" placeholder="smtp.example.net">
@@ -206,7 +240,7 @@ async function renderSettings(saved = false): Promise<void> {
       <div id="certificate-summary" class="error-summary" tabindex="-1" hidden></div>
       <div id="certificate-details"><p class="hint">Loading the current certificate.</p></div>
       <p class="hint">The web console on port ${ServerPort.Web} uses this certificate. A missing certificate is created in the storage directory when the server starts. An existing certificate is kept there and is not written into the source tree.</p>
-      <div class="form-actions"><button id="certificate-upload-button" class="quiet-button" type="button">Upload certificate</button></div>
+      <div class="form-actions"><button id="create-backup" class="quiet-button" type="button">Create backup</button><button id="certificate-upload-button" class="quiet-button" type="button">Upload certificate</button></div>
     </section>
     <dialog id="certificate-dialog" class="modal" aria-labelledby="certificate-dialog-title">
       <form id="certificate-form">

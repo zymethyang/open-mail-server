@@ -18,6 +18,7 @@ import { secureOptions, upgradeToTls } from "../protocol/utils/transportSecurity
 import { SmtpCommand } from "./enums/smtpCommand.js";
 import type { SmtpEndpoint } from "./interfaces/smtpEndpoint.js";
 import type { SmtpSessionState } from "./interfaces/smtpSessionState.js";
+import type { StorageLimits } from "../settings/interfaces/settings.js";
 export type { SmtpEndpoint };
 
 export class SmtpServer {
@@ -30,21 +31,37 @@ export class SmtpServer {
     signInGuard: SignInGuard;
     activityLogger: ActivityLogger;
     serverName(): Promise<string>;
+    limitUnauthenticated?: boolean;
+    readLimits?(): Promise<StorageLimits>;
   }) {}
 
   async start(): Promise<{ server: net.Server; port: number }> {
     const input = this.input;
+    let activeUnauthenticatedConnections = 0;
     const handleConnection = (socket: net.Socket) => {
     void openConnection(socket).catch(() => socket.destroy());
   };
 
   async function openConnection(socket: net.Socket): Promise<void> {
+    const limits = input.readLimits ? await input.readLimits() : null;
+    const readerOptions = {
+      acceptLiterals: false,
+      maximumDataBytes: limits?.maximumMessageBytes || input.configuration.maximumMessageBytes
+    };
+    if (input.limitUnauthenticated && limits && activeUnauthenticatedConnections >= limits.maximumUnauthenticatedConnections) {
+      socket.end("421 4.7.0 Too many connections\r\n");
+      return;
+    }
+    if (input.limitUnauthenticated && limits) {
+      activeUnauthenticatedConnections += 1;
+      socket.once("close", () => {
+        activeUnauthenticatedConnections -= 1;
+      });
+    }
+    let acceptedUnauthenticatedMessages = 0;
     const serverName = oneLine(await input.serverName(), 253) || "localhost";
     socket.setTimeout(2 * 60 * 1000, () => socket.destroy());
-    const reader = createProtocolReader({
-      acceptLiterals: false,
-      maximumDataBytes: input.configuration.maximumMessageBytes
-    });
+    const reader = createProtocolReader(readerOptions);
     const session: SmtpSessionState = {
       secure: input.endpoint.secure,
       greeted: false,
@@ -62,7 +79,7 @@ export class SmtpServer {
     reader.send(`220 ${serverName} ESMTP Open Mail Server ready\r\n`);
 
     function capabilities(): string {
-      const lines = [`250-${serverName}`, "250-PIPELINING", "250-8BITMIME", "250-SMTPUTF8", `250-SIZE ${input.configuration.maximumMessageBytes}`];
+      const lines = [`250-${serverName}`, "250-PIPELINING", "250-8BITMIME", "250-SMTPUTF8", `250-SIZE ${readerOptions.maximumDataBytes}`];
       if (!session.secure) {
         lines.push(`250-${SmtpCommand.StartTls}`);
       }
@@ -293,6 +310,11 @@ export class SmtpServer {
     }
 
     async function acceptMessage(block: Buffer): Promise<void> {
+      if (input.limitUnauthenticated && limits && !session.accountAddress && acceptedUnauthenticatedMessages >= limits.maximumUnauthenticatedMessages) {
+        reader.send("452 4.5.3 Too many messages on this connection\r\n");
+        resetTransaction();
+        return;
+      }
       try {
         await input.deliveryService.deliver({
           fromAddress: session.senderAddress,
@@ -303,6 +325,9 @@ export class SmtpServer {
           protocol: MailProtocol.Smtp
         });
         reader.send("250 2.0.0 Message accepted\r\n");
+        if (input.limitUnauthenticated && limits && !session.accountAddress) {
+          acceptedUnauthenticatedMessages += 1;
+        }
       } catch (error) {
         const statusCode = (error as { statusCode?: number }).statusCode || 450;
         const detail = oneLine((error as Error).message, 300);

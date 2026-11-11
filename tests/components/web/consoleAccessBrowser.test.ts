@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { ConsoleBrowser, type ConsolePageState } from "../../support/consoleBrowser.js";
 import { requestJson, startWebConsole } from "../../support/webConsole.js";
 
-const administratorNavigation = ["Overview", "Logs", "Failed email", "User management", "Settings", "My mailbox"];
+const administratorNavigation = ["Overview", "Logs", "Failed email", "User management", "Addresses", "Settings", "My mailbox"];
 const memberNavigation = ["My mailbox"];
 const companyPaths = ["/api/activity/summary", "/api/activity", "/api/activity/attention", "/api/failed-email", "/api/mailboxes", "/api/settings", "/api/certificate"];
 const signedOutAddresses = [
@@ -168,6 +168,7 @@ function navigationHref(label: string): string {
     Logs: "#logs",
     "Failed email": "#failed-email",
     "User management": "#users",
+    Addresses: "#addresses",
     Settings: "#settings",
     "My mailbox": "#mailbox"
   };

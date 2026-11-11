@@ -9,12 +9,13 @@ describe("console access", () => {
   it("gives administrators the company pages and their own mailbox", () => {
     assert.deepEqual(
       access.navigationEntries("administrator").map((item: { label: string }) => item.label),
-      ["Overview", "Logs", "Failed email", "User management", "Settings", "My mailbox"]
+      ["Overview", "Logs", "Failed email", "User management", "Addresses", "Settings", "My mailbox"]
     );
     assert.equal(access.canOpenRoute("overview", "administrator"), true);
     assert.equal(access.canOpenRoute("logs", "administrator"), true);
     assert.equal(access.canOpenRoute("failed-email", "administrator"), true);
     assert.equal(access.canOpenRoute("users/ada@acme.test", "administrator"), true);
+    assert.equal(access.canOpenRoute("addresses", "administrator"), true);
     assert.equal(access.canOpenRoute("settings", "administrator"), true);
     assert.equal(access.canOpenRoute("attention", "administrator"), true);
     assert.equal(access.canOpenRoute("mailbox", "administrator"), true);

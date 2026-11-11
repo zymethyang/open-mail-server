@@ -22,11 +22,19 @@ export interface ListenerSettings {
   secureWeb: boolean;
 }
 
+export interface StorageLimits {
+  maximumMessageBytes: number;
+  mailboxQuotaBytes: number;
+  maximumUnauthenticatedConnections: number;
+  maximumUnauthenticatedMessages: number;
+}
+
 export interface ServerSettings {
   publicHostname: string;
   relay: MailRelaySettings;
   listeners: ListenerSettings;
   listenersSaved: boolean;
+  limits: StorageLimits;
 }
 
 export interface PublicServerSettings {
@@ -40,6 +48,7 @@ export interface PublicServerSettings {
     passwordSaved: boolean;
   };
   secureWeb: boolean;
+  limits: StorageLimits;
 }
 
 export interface SettingsRepository {
@@ -55,6 +64,7 @@ export interface SettingsRepository {
       security: RelaySecurity;
     };
     secureWeb?: boolean;
+    limits?: Partial<StorageLimits>;
   }): Promise<PublicServerSettings>;
   present(settings: ServerSettings): PublicServerSettings;
 }

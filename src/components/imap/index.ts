@@ -9,6 +9,7 @@ import { createStoredMessage, parseRawMessage, quoteImap } from "../mime/index.j
 import type { AccountRepository } from "../account/interfaces/accountRepository.js";
 import type { ActivityLogger } from "../activity/interfaces/activityLogger.js";
 import type { MessageRepository } from "../message/interfaces/messageRepository.js";
+import { findFolder } from "../message/utils/folder.js";
 import type { PublicAccount } from "../account/interfaces/accountRecord.js";
 import type { ServerCertificate } from "../certificate/index.js";
 import type { SignInGuard } from "../signIn/interfaces/signInGuard.js";
@@ -46,6 +47,27 @@ function capabilityText(secure: boolean): string {
     parts.push("LOGINDISABLED", ImapCommand.StartTls);
   }
   return parts.join(" ");
+}
+
+function attributeNeedsBody(attribute: string): boolean {
+  const upper = attribute.replace(/<\d+(?:\.\d+)?>$/, "").toUpperCase();
+  return upper !== "UID" && upper !== "FLAGS" && upper !== "INTERNALDATE" && upper !== "RFC822.SIZE" && upper !== "ENVELOPE";
+}
+
+function searchNeedsMessageBody(tokens: ImapToken[]): boolean {
+  for (const token of tokens) {
+    if (Array.isArray(token)) {
+      if (searchNeedsMessageBody(token)) {
+        return true;
+      }
+      continue;
+    }
+    const word = String(token).toUpperCase();
+    if (word === "BODY" || word === "TEXT") {
+      return true;
+    }
+  }
+  return false;
 }
 
 export class ImapServer {
@@ -201,7 +223,7 @@ export class ImapServer {
         return;
       }
       const folders = await input.messageRepository.listFolders(session.account.address);
-      const folder = folders.find((item) => item.displayName.toLowerCase() === String(folderName).toLowerCase() || item.storageName === String(folderName).toLowerCase());
+      const folder = findFolder(folders, folderName);
       if (!folder) {
         reader.send(`${tag} NO Unknown folder\r\n`);
         return;
@@ -230,12 +252,17 @@ export class ImapServer {
       session.selected.messages = messages;
       const attributes = expandAttributes(attributeToken);
       const chosen = selectedMessages(messages, setText, useUniqueIdentifier);
+      const needsBody = attributes.some((attribute) => attributeNeedsBody(attribute));
       for (const item of chosen) {
         let current = item.message;
         if (!session.selected.readOnly && attributes.some((attribute) => setsSeen(attribute)) && !current.seen) {
           current = await input.messageRepository.updateMessage(session.account.address, session.selected.folder.storageName, current.identifier, {
             seen: true
           });
+        }
+        if (needsBody) {
+          const stored = await input.messageRepository.readMessage(session.account.address, session.selected.folder.storageName, current.identifier);
+          current = { ...stored, seen: current.seen, answered: current.answered, flagged: current.flagged, deleted: current.deleted, draft: current.draft };
         }
         const items = attributes.flatMap((attribute) => fetchItems(current, attribute));
         if (!items.length) {
@@ -254,7 +281,12 @@ export class ImapServer {
       if (!requireSelected(tag) || !session.account || !session.selected) {
         return;
       }
-      const messages = await input.messageRepository.listMessages(session.account.address, session.selected.folder.storageName);
+      const account = session.account;
+      const selected = session.selected;
+      const listed = await input.messageRepository.listMessages(account.address, selected.folder.storageName);
+      const messages = searchNeedsMessageBody(tokens)
+        ? await Promise.all(listed.map((message) => input.messageRepository.readMessage(account.address, selected.folder.storageName, message.identifier)))
+        : listed;
       const predicate = compileSearch(tokens, messages, useUniqueIdentifier);
       const numbers = messages.flatMap((message, index) => (predicate(message) ? [useUniqueIdentifier ? message.uniqueIdentifier : index + 1] : []));
       reader.send(`* SEARCH${numbers.length ? ` ${numbers.join(" ")}` : ""}\r\n`);
@@ -299,7 +331,7 @@ export class ImapServer {
         return;
       }
       const folders = await input.messageRepository.listFolders(session.account.address);
-      const destination = folders.find((folder) => folder.displayName.toLowerCase() === destinationName.toLowerCase() || folder.storageName === destinationName.toLowerCase());
+      const destination = findFolder(folders, destinationName);
       if (!destination) {
         reader.send(`${tag} NO Unknown folder\r\n`);
         return;
@@ -315,7 +347,8 @@ export class ImapServer {
         }
       } else {
         for (const item of chosen) {
-          await input.messageRepository.appendMessage(session.account.address, destination.storageName, item.message);
+          const stored = await input.messageRepository.readMessage(session.account.address, session.selected.folder.storageName, item.message.identifier);
+          await input.messageRepository.appendMessage(session.account.address, destination.storageName, stored);
         }
       }
       reader.send(`${tag} OK ${move ? "MOVE" : "COPY"} completed\r\n`);
@@ -346,7 +379,7 @@ export class ImapServer {
       }
       const folders = await input.messageRepository.listFolders(session.account.address);
       const folderName = String(tokens[2] || "");
-      const folder = folders.find((item) => item.displayName.toLowerCase() === folderName.toLowerCase() || item.storageName === folderName.toLowerCase());
+      const folder = findFolder(folders, folderName);
       if (!folder) {
         reader.send(`${tag} NO Unknown folder\r\n`);
         return;
@@ -477,7 +510,7 @@ export class ImapServer {
         }
         if (command === ImapCommand.Status) {
           const folders = await input.messageRepository.listFolders(session.account.address);
-          const folder = folders.find((item) => item.displayName.toLowerCase() === String(tokens[2] || "").toLowerCase());
+          const folder = findFolder(folders, String(tokens[2] || ""));
           const requested = Array.isArray(tokens[3]) ? tokens[3].map((item) => String(item).toUpperCase()) : [];
           if (!folder) {
             reader.send(`${tag} NO Unknown folder\r\n`);

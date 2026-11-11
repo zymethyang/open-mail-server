@@ -16,7 +16,7 @@ export async function readStoredDnsGuide(configuration: Configuration): Promise<
   if (!organization) {
     return null;
   }
-  const settings = await new SettingsRepository(configuration.storageDirectory).read();
+  const settings = await new SettingsRepository(configuration.storageDirectory, configuration.maximumMessageBytes).read();
   const hostname = mailHostname(settings.publicHostname, configuration.publicHostname, organization.domain, configuration.configuredDomain);
   const domainKey = await openDomainKey(configuration.storageDirectory);
   const guide = createDnsGuide(organization.domain, hostname, organization.publicAddress, domainKey.recordValue, organization.administratorAddress);

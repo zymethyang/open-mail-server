@@ -6,4 +6,6 @@ export interface CertificateDescription {
   names: string[];
   selfSigned: boolean;
   intermediateCount: number;
+  daysRemaining: number;
+  renewalRequired: boolean;
 }

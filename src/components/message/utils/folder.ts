@@ -1,24 +1,38 @@
 import type { MailFolder } from "../interfaces/mailTypes.js";
 
+export const maximumFolderNameLength = 200;
+
 export function storageNameFromDisplay(displayName: string): string {
-  return displayName
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 40);
+  const trimmed = displayName.trim();
+  if (!trimmed || trimmed.length > maximumFolderNameLength || trimmed.includes("\0") || trimmed === "." || trimmed === "..") {
+    return "";
+  }
+  return encodeURIComponent(trimmed);
 }
 
 export function findFolder(folders: MailFolder[], name: unknown): MailFolder | null {
-  const lowered = String(name ?? "")
+  const cleaned = String(name ?? "")
     .replace(/^"|"$/g, "")
-    .trim()
-    .toLowerCase();
+    .trim();
+  if (!cleaned) {
+    return null;
+  }
+  if (cleaned.toLowerCase() === "inbox") {
+    return folders.find((folder) => folder.storageName === "inbox" || folder.specialUse === "\\Inbox") || null;
+  }
+  const encoded = storageNameFromDisplay(cleaned);
   return (
-    folders.find((folder) => folder.storageName === lowered || folder.displayName.toLowerCase() === lowered) || null
+    folders.find((folder) => folder.displayName === cleaned || folder.storageName === cleaned || (encoded !== "" && folder.storageName === encoded)) ||
+    null
   );
 }
 
 export function isSafeStorageName(storageName: string): boolean {
-  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(storageName);
+  if (!storageName || storageName.length > 600 || storageName === "." || storageName === "..") {
+    return false;
+  }
+  if (storageName.includes("/") || storageName.includes("\\") || storageName.includes("\0")) {
+    return false;
+  }
+  return /^[A-Za-z0-9._~%!-]+$/.test(storageName);
 }

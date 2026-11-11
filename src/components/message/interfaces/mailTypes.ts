@@ -49,6 +49,29 @@ export interface MessageDraft {
   rawEncoded: string;
   rawSize: number;
   attachments: AttachmentRecord[];
+  snippet?: string;
+}
+
+export interface MessageSummary {
+  identifier: string;
+  uniqueIdentifier: number;
+  folderName: string;
+  fromName: string;
+  fromAddress: string;
+  toAddresses: string[];
+  copyAddresses: string[];
+  subject: string;
+  date: string;
+  messageIdentifierHeader: string;
+  inReplyTo: string;
+  seen: boolean;
+  answered: boolean;
+  flagged: boolean;
+  deleted: boolean;
+  draft: boolean;
+  keywords: string[];
+  rawSize: number;
+  snippet: string;
 }
 
 export interface MessageRecord extends MessageDraft {

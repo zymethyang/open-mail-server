@@ -7,4 +7,4 @@ export const storageKeyDerivationHash = "sha256";
 export const storageKeyDerivationSalt = "email-server";
 export const storageKeyDerivationInfo = "storage-v2";
 export const storageAssociatedDataPrefix = "email-server.storage.v2";
-export const maximumSealedBytes = 80 * 1024 * 1024;
+export const maximumSealedBytes = 512 * 1024 * 1024;

@@ -5,6 +5,7 @@ export interface MessageRepository {
   mailboxState(address: string): Promise<MailboxState>;
   listFolders(address: string): Promise<MailFolder[]>;
   listMessages(address: string, folderName: string): Promise<MessageRecord[]>;
+  mailboxSize(address: string): Promise<number>;
   readMessage(address: string, folderName: string, identifier: string): Promise<MessageRecord>;
   appendMessage(address: string, folderName: string, message: MessageDraft): Promise<MessageRecord>;
   updateMessage(

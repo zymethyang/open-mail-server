@@ -11,7 +11,7 @@ import { OrganizationRepository } from "../../src/components/organization/index.
 import { SessionRepository } from "../../src/components/session/index.js";
 import { SettingsRepository } from "../../src/components/settings/index.js";
 import { SignInGuard } from "../../src/components/signIn/index.js";
-import { createWebServer, startWebServer } from "../../src/components/web/index.js";
+import { createWebServer, startWebServer, type ListenerStatus } from "../../src/components/web/index.js";
 import { startSmtpSink, type SmtpSink } from "./smtpSink.js";
 import { createTemporaryStorage, removeTemporaryStorage } from "./temporaryStorage.js";
 import { testConfiguration } from "./testConfiguration.js";
@@ -67,7 +67,7 @@ export async function requestJson(
   return { status: response.status, payload, cookieHeader: cookieHeader(lines) };
 }
 
-export async function startWebConsole(options: { configuredDomain?: string; serverName?: string; listenHost?: string; mailExchangeResolver?: (sink: SmtpSink) => MailExchangeResolver } = {}): Promise<RunningWebConsole> {
+export async function startWebConsole(options: { configuredDomain?: string; serverName?: string; listenHost?: string; listenerStatus?: ListenerStatus[]; mailExchangeResolver?: (sink: SmtpSink) => MailExchangeResolver } = {}): Promise<RunningWebConsole> {
   const storageDirectory = await createTemporaryStorage();
   const sink = await startSmtpSink();
   const configuration = testConfiguration(storageDirectory);
@@ -82,7 +82,7 @@ export async function startWebConsole(options: { configuredDomain?: string; serv
   const messageRepository = new MessageRepository(storageDirectory, mailboxEvents);
   const sessionRepository = new SessionRepository(storageDirectory);
   const activityLogger = new ActivityLogger(storageDirectory);
-  const settingsRepository = new SettingsRepository(storageDirectory);
+  const settingsRepository = new SettingsRepository(storageDirectory, configuration.maximumMessageBytes);
   const certificate = await loadCertificate(storageDirectory, [configuration.configuredDomain]);
   const signingDomain = async () => (await organizationRepository.read())?.domain || configuration.configuredDomain;
   const deliveryService = new DeliveryService({
@@ -112,7 +112,7 @@ export async function startWebConsole(options: { configuredDomain?: string; serv
     activityLogger,
     deliveryService,
     signInGuard: new SignInGuard(),
-    listenerStatus: [],
+    listenerStatus: options.listenerStatus || [],
     certificate,
     serverName: async () => options.serverName || "127.0.0.1",
     settingsRepository,
