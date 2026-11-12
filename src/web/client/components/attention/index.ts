@@ -51,7 +51,7 @@ function showProblem(index: number): void {
 
 function eventRows(events: ActivityEvent[]): string {
   if (!events.length) {
-    return `<div class="empty"><h2>No recorded problems</h2><p>Failed, rejected, and queued mail from today appears here until the counter is reset.</p></div>`;
+    return `<div class="empty"><h2>No recorded problems</h2><p>Failed, rejected, and queued mail from today appears here until reset.</p></div>`;
   }
   const rows = events
     .map((event, index) => {
@@ -72,14 +72,14 @@ function eventRows(events: ActivityEvent[]): string {
 
 function waitingRows(messages: FailedEmail[]): string {
   if (!messages.length) {
-    return `<div class="empty"><h2>Nothing is waiting</h2><p>Outbound mail that could not leave this server is listed on Failed email.</p></div>`;
+    return `<div class="empty"><h2>Nothing is waiting</h2><p>See Failed email for outbound mail that could not leave.</p></div>`;
   }
   const rows = messages
     .map((message) => {
       return `<tr><td>${escapeHtml(presentTime(message.nextAttemptAt))}</td><td>${escapeHtml(message.senderAddress)}</td><td>${escapeHtml(message.recipientAddresses.join(", "))}</td><td>${escapeHtml(message.subject)}</td><td>${message.attempts}</td><td>${escapeHtml(message.lastError)}</td></tr>`;
     })
     .join("");
-  return `<div class="table-wrap"><table><caption class="visually-hidden">Mail waiting to retry</caption><thead><tr><th>Next attempt</th><th>Sender</th><th>Recipients</th><th>Subject</th><th>Attempts</th><th>Last error</th></tr></thead><tbody>${rows}</tbody></table></div><p class="hint"><a href="#failed-email">Open failed email</a> to resend this mail.</p>`;
+  return `<div class="table-wrap"><table><caption class="visually-hidden">Mail waiting to retry</caption><thead><tr><th>Next attempt</th><th>Sender</th><th>Recipients</th><th>Subject</th><th>Attempts</th><th>Last error</th></tr></thead><tbody>${rows}</tbody></table></div><p class="hint"><a href="/admin/failed-email">Open failed email</a> to resend this mail.</p>`;
 }
 
 function bindAttention(): void {
@@ -127,7 +127,7 @@ async function resetAttention(): Promise<void> {
   button.disabled = true;
   try {
     await requestJson(ApiEndpoint.ActivityAttentionReset, { method: "POST", body: "{}" });
-    await renderAttention("Today's recorded problems no longer add to Needs attention. Mail that is still waiting to retry stays listed.");
+    await renderAttention("Today’s problems no longer count toward Needs attention. Mail still waiting to retry stays listed.");
   } catch (error) {
     summary.className = "error-summary";
     summary.hidden = false;

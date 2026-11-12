@@ -4,36 +4,50 @@ import { after, before, describe, it } from "node:test";
 import { requestJson, startWebConsole, type RunningWebConsole } from "../../support/webConsole.js";
 
 const companyRequests: Array<{ method: string; pathName: string; body?: unknown }> = [
-  { method: "GET", pathName: "/api/activity/summary" },
-  { method: "GET", pathName: "/api/activity" },
-  { method: "GET", pathName: "/api/activity?search=secret" },
-  { method: "GET", pathName: "/api/activity/attention" },
-  { method: "POST", pathName: "/api/activity/attention/reset", body: {} },
-  { method: "GET", pathName: "/api/failed-email" },
-  { method: "POST", pathName: "/api/failed-email/resend", body: { identifiers: [] } },
-  { method: "GET", pathName: "/api/mailboxes" },
-  { method: "POST", pathName: "/api/mailboxes", body: { address: "injected@acme.test", displayName: "Injected", password: "member-horse", role: "administrator" } },
-  { method: "POST", pathName: "/api/mailboxes/password", body: { address: "ada@acme.test", password: "changed-horse" } },
-  { method: "POST", pathName: "/api/mailboxes/access", body: { address: "ada@acme.test", disabled: true } },
-  { method: "GET", pathName: "/api/settings" },
-  { method: "PUT", pathName: "/api/settings", body: { publicHostname: "evil.test", relay: { enabled: true, host: "relay.evil.test", port: 587, username: "intruder", password: "intruder-horse", security: "starttls" } } },
-  { method: "POST", pathName: "/api/settings", body: { publicHostname: "evil.test" } },
-  { method: "PATCH", pathName: "/api/settings", body: { publicHostname: "evil.test" } },
-  { method: "DELETE", pathName: "/api/settings" },
-  { method: "GET", pathName: "/api/settings/export" },
-  { method: "GET", pathName: "/api/certificate" },
-  { method: "POST", pathName: "/api/certificate", body: { certificate: "not-a-certificate", privateKey: "not-a-key" } },
-  { method: "HEAD", pathName: "/api/activity/summary" }
+  { method: "GET", pathName: "/api/admin/activity/summary" },
+  { method: "GET", pathName: "/api/admin/activity" },
+  { method: "GET", pathName: "/api/admin/activity?search=secret" },
+  { method: "GET", pathName: "/api/admin/activity/attention" },
+  { method: "POST", pathName: "/api/admin/activity/attention/reset", body: {} },
+  { method: "GET", pathName: "/api/admin/failed-email" },
+  { method: "POST", pathName: "/api/admin/failed-email/resend", body: { identifiers: [] } },
+  { method: "GET", pathName: "/api/admin/mailboxes" },
+  { method: "POST", pathName: "/api/admin/mailboxes", body: { address: "injected@acme.test", displayName: "Injected", password: "member-horse", role: "administrator" } },
+  { method: "POST", pathName: "/api/admin/mailboxes/password", body: { address: "ada@acme.test", password: "changed-horse" } },
+  { method: "POST", pathName: "/api/admin/mailboxes/access", body: { address: "ada@acme.test", disabled: true } },
+  { method: "GET", pathName: "/api/admin/settings" },
+  { method: "PUT", pathName: "/api/admin/settings", body: { publicHostname: "evil.test", relay: { enabled: true, host: "relay.evil.test", port: 587, username: "intruder", password: "intruder-horse", security: "starttls" } } },
+  { method: "POST", pathName: "/api/admin/settings", body: { publicHostname: "evil.test" } },
+  { method: "PATCH", pathName: "/api/admin/settings", body: { publicHostname: "evil.test" } },
+  { method: "DELETE", pathName: "/api/admin/settings" },
+  { method: "GET", pathName: "/api/admin/settings/export" },
+  { method: "GET", pathName: "/api/admin/certificate" },
+  { method: "POST", pathName: "/api/admin/certificate", body: { certificate: "not-a-certificate", privateKey: "not-a-key" } },
+  { method: "HEAD", pathName: "/api/admin/activity/summary" }
 ];
 
 const injectedPaths = [
-  "/api/../api/settings",
-  "/api/folders/../settings",
-  "/api/account/../../api/mailboxes",
-  "/api/%2e%2e/api/certificate",
-  "/api/settings%2f..%2fmailboxes",
-  "/API/settings",
-  "/api/settings%00"
+  "/api/../api/admin/settings",
+  "/api/folders/../admin/settings",
+  "/api/account/../../api/admin/mailboxes",
+  "/api/%2e%2e/api/admin/certificate",
+  "/api/admin/settings%2f..%2fmailboxes",
+  "/API/admin/settings",
+  "/api/admin/settings%00"
+];
+
+const retiredCompanyPaths = [
+  "/api/activity",
+  "/api/activity/summary",
+  "/api/activity/attention",
+  "/api/failed-email",
+  "/api/failed-email/resend",
+  "/api/mailboxes",
+  "/api/mailboxes/password",
+  "/api/address-routes",
+  "/api/settings",
+  "/api/certificate",
+  "/api/backup"
 ];
 
 describe("api access rules", () => {
@@ -55,7 +69,7 @@ describe("api access rules", () => {
     const created = await requestJson(
       consoleServer.baseUrl,
       "POST",
-      "/api/mailboxes",
+      "/api/admin/mailboxes",
       { address: "bea@acme.test", displayName: "Bea Member", password: "member-horse", role: "administrator" },
       administratorCookie
     );
@@ -73,13 +87,22 @@ describe("api access rules", () => {
     assert.equal(anonymous.payload.account, null);
     assert.equal(anonymous.payload.hosting, null);
     assert.deepEqual(anonymous.payload.listeners, []);
+    assert.equal(record(anonymous.payload.organization).domain, "acme.test");
+    assert.equal(record(anonymous.payload.organization).displayName, "Acme");
+    assert.equal(Object.prototype.hasOwnProperty.call(anonymous.payload.organization, "publicAddress"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(anonymous.payload.organization, "administratorAddress"), false);
+    assert.equal(JSON.stringify(anonymous.payload).includes("publicAddress"), false);
+    assert.equal(JSON.stringify(anonymous.payload).includes("administratorAddress"), false);
+    assert.equal(JSON.stringify(anonymous.payload).includes("zoneFile"), false);
 
     const administrator = await requestJson(consoleServer.baseUrl, "GET", "/api/bootstrap", undefined, administratorCookie);
     assert.equal(record(administrator.payload.account).role, "administrator");
     assert.equal(record(administrator.payload.hosting).domain, "acme.test");
     assert.ok(Array.isArray(administrator.payload.listeners));
+    assert.equal(record(administrator.payload.organization).publicAddress, "149.28.152.245");
+    assert.equal(record(administrator.payload.organization).administratorAddress, "ada@acme.test");
 
-    for (const pathName of ["/api/activity/summary", "/api/activity", "/api/activity/attention", "/api/failed-email", "/api/mailboxes", "/api/settings", "/api/certificate"]) {
+    for (const pathName of ["/api/admin/activity/summary", "/api/admin/activity", "/api/admin/activity/attention", "/api/admin/failed-email", "/api/admin/mailboxes", "/api/admin/settings", "/api/admin/certificate"]) {
       const response = await requestJson(consoleServer.baseUrl, "GET", pathName, undefined, administratorCookie);
       assert.equal(response.status, 200, pathName);
     }
@@ -92,7 +115,18 @@ describe("api access rules", () => {
     assert.equal(record(bootstrap.payload.account).role, "member");
     assert.equal(bootstrap.payload.hosting, null);
     assert.deepEqual(bootstrap.payload.listeners, []);
+    assert.equal(record(bootstrap.payload.organization).domain, "acme.test");
+    assert.equal(record(bootstrap.payload.organization).displayName, "Acme");
+    assert.equal(Object.prototype.hasOwnProperty.call(bootstrap.payload.organization, "publicAddress"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(bootstrap.payload.organization, "administratorAddress"), false);
+    assert.equal(JSON.stringify(bootstrap.payload).includes("publicAddress"), false);
+    assert.equal(JSON.stringify(bootstrap.payload).includes("administratorAddress"), false);
     assert.equal(JSON.stringify(bootstrap.payload).includes("zoneFile"), false);
+    const mailClient = await requestJson(consoleServer.baseUrl, "GET", "/api/mail-client-settings", undefined, memberCookie);
+    assert.equal(mailClient.status, 200);
+    assert.ok(record(mailClient.payload.clients).incomingHost);
+    assert.equal(JSON.stringify(mailClient.payload).includes("zoneFile"), false);
+    assert.equal(JSON.stringify(mailClient.payload).includes("dns"), false);
 
     const mailbox = await requestJson(consoleServer.baseUrl, "GET", "/api/folders", undefined, memberCookie);
     assert.equal(mailbox.status, 200);
@@ -144,10 +178,10 @@ describe("api access rules", () => {
       assert.equal(response.text.includes("\"mailboxes\""), false, pathName);
     }
 
-    const mailboxes = await requestJson(consoleServer.baseUrl, "GET", "/api/mailboxes", undefined, administratorCookie);
+    const mailboxes = await requestJson(consoleServer.baseUrl, "GET", "/api/admin/mailboxes", undefined, administratorCookie);
     const addresses = arrayOf(mailboxes.payload.mailboxes).map((mailbox) => String(record(mailbox).address));
     assert.deepEqual(addresses.sort(), ["ada@acme.test", "bea@acme.test"]);
-    const settings = await requestJson(consoleServer.baseUrl, "GET", "/api/settings", undefined, administratorCookie);
+    const settings = await requestJson(consoleServer.baseUrl, "GET", "/api/admin/settings", undefined, administratorCookie);
     assert.equal(record(settings.payload.settings).publicHostname, "");
     assert.equal(record(record(settings.payload.settings).relay).enabled, false);
     const administrator = await requestJson(consoleServer.baseUrl, "GET", "/api/bootstrap", undefined, administratorCookie);
@@ -171,6 +205,18 @@ describe("api access rules", () => {
       const response = await rawRequest(consoleServer.baseUrl, "GET", pathName, "");
       assert.notEqual(response.status, 200, pathName);
       assert.equal(response.text.includes("publicHostname"), false, pathName);
+    }
+  });
+
+  it("returns not found for retired company API paths", async () => {
+    const memberCookie = await memberSession(consoleServer);
+    for (const pathName of retiredCompanyPaths) {
+      const anonymous = await requestJson(consoleServer.baseUrl, "GET", pathName);
+      assert.equal(anonymous.status, 404, `anonymous ${pathName}`);
+      const member = await requestJson(consoleServer.baseUrl, "GET", pathName, undefined, memberCookie);
+      assert.equal(member.status, 404, `member ${pathName}`);
+      const administrator = await requestJson(consoleServer.baseUrl, "GET", pathName, undefined, administratorCookie);
+      assert.equal(administrator.status, 404, `administrator ${pathName}`);
     }
   });
 });

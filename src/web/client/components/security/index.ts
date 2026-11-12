@@ -22,7 +22,7 @@ function bindAuthenticator(): void {
         const image = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(payload.image)}`;
         element("#authenticator-setup").innerHTML = `
           <div class="authenticator-frame"><img class="authenticator-image" alt="Authenticator setup code" src="${image}"></div>
-          <p class="security-copy">Scan this code, or enter the key manually. Spaces are only there to make the key easier to read.</p>
+          <p class="security-copy">Scan the code, or enter the key. Spaces are only for readability.</p>
           <p class="secret-code">${escapeHtml(payload.secret.replace(/(.{4})/g, "$1 ").trim())}</p>
           <form id="authenticator-confirm">
             <label for="authenticator-code">Code from the app</label>
@@ -44,7 +44,7 @@ function bindAuthenticator(): void {
             const notice = element<HTMLElement>("#authenticator-summary");
             notice.className = "notice";
             notice.hidden = false;
-            notice.innerHTML = "<h2>Authenticator is on</h2><p>The next web sign-in asks for a code after the password.</p>";
+            notice.innerHTML = "<h2>Authenticator is on</h2><p>Next web sign-in asks for a code after the password.</p>";
           } catch (error) {
             showFormError(element("#authenticator-confirm"), summary, errorMessage(error), "authenticator-code");
           }
@@ -94,13 +94,13 @@ async function renderPassword(): Promise<void> {
       <input class="visually-hidden" autocomplete="username" value="${escapeHtml(account.address)}" readonly tabindex="-1">
       <label for="current-password">Current password</label><input id="current-password" type="password" autocomplete="current-password" required>
       <label for="new-password">New password</label><input id="new-password" type="password" autocomplete="new-password" required minlength="8">
-      <p class="security-copy">This password is also used for SMTP, IMAP, and POP3. Other signed-in sessions for this mailbox are signed out.</p>
+      <p class="security-copy">Also used for SMTP, IMAP, and POP3. Other sessions for this mailbox are signed out.</p>
       <div class="form-actions"><button class="primary-button" type="submit">${iconLabel("savePassword", "Save password")}</button></div>
     </form>
     <section class="card stack-card" id="authenticator-card">
       <h2>Authenticator</h2>
       <div id="authenticator-summary" class="error-summary" tabindex="-1" hidden></div>
-      <p class="security-copy">${enabled ? "An authenticator app is required after the password when you sign in on the web." : "Add an authenticator app for the web console. Mail clients keep using the password."}</p>
+      <p class="security-copy">${enabled ? "Web sign-in asks for a code after the password." : "Add an authenticator for the web console. Mail clients still use the password."}</p>
       <div id="authenticator-setup"></div>
       ${enabled ? `<details class="fold"><summary>Turn off authenticator</summary><form id="authenticator-remove" class="fold-body">
         <input class="visually-hidden" autocomplete="username" value="${escapeHtml(account.address)}" readonly tabindex="-1">

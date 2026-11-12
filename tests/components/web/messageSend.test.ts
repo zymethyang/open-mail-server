@@ -27,7 +27,7 @@ describe("sending a message", () => {
       const created = await requestJson(
         consoleServer.baseUrl,
         "POST",
-        "/api/mailboxes",
+        "/api/admin/mailboxes",
         { address: "bea@acme.test", displayName: "Bea Member", password: "member-horse" },
         cookie
       );
@@ -35,12 +35,12 @@ describe("sending a message", () => {
       const disabled = await requestJson(
         consoleServer.baseUrl,
         "POST",
-        "/api/mailboxes",
+        "/api/admin/mailboxes",
         { address: "cam@acme.test", displayName: "Cam Member", password: "member-horse" },
         cookie
       );
       assert.equal(disabled.status, 201);
-      const turnedOff = await requestJson(consoleServer.baseUrl, "POST", "/api/mailboxes/access", { address: "cam@acme.test", disabled: true }, cookie);
+      const turnedOff = await requestJson(consoleServer.baseUrl, "POST", "/api/admin/mailboxes/access", { address: "cam@acme.test", disabled: true }, cookie);
       assert.equal(turnedOff.status, 200);
 
       const emptyRecipient = await requestJson(consoleServer.baseUrl, "POST", "/api/messages", { to: "  ", subject: "test", text: "test" }, cookie);
@@ -173,7 +173,7 @@ describe("sending a message", () => {
       assert.ok(Date.now() - started < 1000);
       assert.deepEqual(outside.payload.queuedRecipients, ["person@example.test"]);
       assert.equal(outside.payload.warning, "");
-      const waiting = await requestJson(consoleServer.baseUrl, "GET", "/api/failed-email", undefined, cookie);
+      const waiting = await requestJson(consoleServer.baseUrl, "GET", "/api/admin/failed-email", undefined, cookie);
       assert.equal(waiting.status, 200);
       const finished = Date.now();
       while (!consoleServer.sink.messages.some((message) => message.includes("Leave now")) && Date.now() - finished < 4000) {

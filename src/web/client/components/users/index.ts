@@ -2,6 +2,7 @@ import { ApiEndpoint } from "../../enums/apiEndpoint.js";
 import { requestJson } from "../../http/jsonClient.js";
 import type { MailboxPerson } from "../../interfaces/models.js";
 import type { Page } from "../../interfaces/page.js";
+import { navigateTo } from "../../session/pathNavigation.js";
 import { applicationState } from "../../state/applicationState.js";
 import { element, optionalElement } from "../../utils/element.js";
 import { escapeHtml } from "../../utils/escapeHtml.js";
@@ -48,14 +49,14 @@ function userRows(people: MailboxPerson[]): string {
 function bindUserRows(): void {
   document.querySelectorAll<HTMLButtonElement>("[data-manage]").forEach((button) => {
     button.addEventListener("click", () => {
-      location.hash = `#users/${encodeURIComponent(button.dataset.manage || "")}`;
+      navigateTo(`/admin/users/${encodeURIComponent(button.dataset.manage || "")}`);
     });
   });
 }
 
 export const userDirectoryPage: Page = {
   matches(route, role) {
-    return role === "administrator" && (route === "users" || route.startsWith("mailboxes"));
+    return role === "administrator" && (route === "users" || route === "mailboxes");
   },
   async render() {
     const generation = currentRouteGeneration();
@@ -87,7 +88,7 @@ export const userDirectoryPage: Page = {
     search.addEventListener("input", paint);
     status.addEventListener("change", paint);
     element("#add-user").addEventListener("click", () => {
-      location.hash = "#users/new";
+      navigateTo("/admin/users/new");
     });
     bindUserRows();
   }
@@ -130,7 +131,7 @@ async function renderUserEditor(address: string, notice = ""): Promise<void> {
       return;
     }
     element("#back-users").addEventListener("click", () => {
-      location.hash = "#users";
+      navigateTo("/admin/users");
     });
     return;
   }
@@ -141,7 +142,7 @@ async function renderUserEditor(address: string, notice = ""): Promise<void> {
       <label for="user-name">Name</label><input id="user-name" autocomplete="name" required maxlength="80">
       <label for="user-address">Email address</label><input id="user-address" autocomplete="off" required placeholder="person@${escapeHtml(domain)}">
       <label for="user-password">Password</label><input id="user-password" type="password" autocomplete="new-password" required minlength="8">
-      <p class="hint">The address must use ${escapeHtml(domain)}. The password is also used for SMTP, IMAP, and POP3.</p>
+      <p class="hint">Must use ${escapeHtml(domain)}. Password also applies to SMTP, IMAP, and POP3.</p>
       <div class="form-actions"><button class="primary-button" type="submit">Create user</button><button id="cancel-user" class="quiet-button" type="button">Cancel</button></div>
     </form>`
     : `<form id="manage-form" class="card detail-card"><h2>${escapeHtml(presentName(selected?.displayName) || selected?.address || "")}</h2>${savedNotice}<div id="manage-summary" class="error-summary" tabindex="-1" hidden></div>
@@ -151,7 +152,7 @@ async function renderUserEditor(address: string, notice = ""): Promise<void> {
         <div><dt>Status</dt><dd class="${selected?.disabled ? "status-disabled" : ""}">${selected?.disabled ? "Disabled" : "Active"}</dd></div>
       </dl>
       <label for="manage-password">New password</label><input id="manage-password" type="password" autocomplete="new-password" minlength="8">
-      <p class="hint">Leave the password empty to keep the current one. Disabling blocks the web console, SMTP, IMAP, and POP3.</p>
+      <p class="hint">Leave password blank to keep it. Disable blocks web, SMTP, IMAP, and POP3.</p>
       <input id="manage-address" type="hidden" value="${escapeHtml(selected?.address || "")}">
       <div class="form-actions"><button class="primary-button" type="submit">${iconLabel("savePassword", "Save password")}</button>${selected ? signInButton(selected, people) : ""}<button id="cancel-user" class="quiet-button" type="button">${iconLabel("back", "Back to users")}</button></div>
     </form>`;
@@ -162,7 +163,7 @@ async function renderUserEditor(address: string, notice = ""): Promise<void> {
     return;
   }
   const back = () => {
-    location.hash = "#users";
+    navigateTo("/admin/users");
   };
   element("#back-users").addEventListener("click", back);
   element("#cancel-user").addEventListener("click", back);
@@ -183,7 +184,7 @@ async function renderUserEditor(address: string, notice = ""): Promise<void> {
           password: element<HTMLInputElement>("#user-password").value
         })
       });
-      location.hash = "#users";
+      navigateTo("/admin/users");
     } catch (error) {
       showFormError(form, summary, errorMessage(error), "user-address");
     }

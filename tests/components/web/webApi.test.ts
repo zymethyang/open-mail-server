@@ -128,7 +128,7 @@ describe("web console interface", { concurrency: 1 }, () => {
     const created = await requestJson(
       consoleServer.baseUrl,
       "POST",
-      "/api/mailboxes",
+      "/api/admin/mailboxes",
       { address: "bea@acme.test", displayName: "Bea Member", password: "member-horse" },
       administratorCookie
     );
@@ -136,7 +136,7 @@ describe("web console interface", { concurrency: 1 }, () => {
     const invalidMailbox = await requestJson(
       consoleServer.baseUrl,
       "POST",
-      "/api/mailboxes",
+      "/api/admin/mailboxes",
       { address: "bea@example.test", displayName: "Bea", password: "member-horse" },
       administratorCookie
     );
@@ -147,9 +147,9 @@ describe("web console interface", { concurrency: 1 }, () => {
     });
     assert.equal(memberSignIn.status, 200);
     memberCookie = memberSignIn.cookieHeader;
-    const forbidden = await requestJson(consoleServer.baseUrl, "GET", "/api/mailboxes", undefined, memberCookie);
+    const forbidden = await requestJson(consoleServer.baseUrl, "GET", "/api/admin/mailboxes", undefined, memberCookie);
     assert.equal(forbidden.status, 403);
-    const mailboxes = await requestJson(consoleServer.baseUrl, "GET", "/api/mailboxes", undefined, administratorCookie);
+    const mailboxes = await requestJson(consoleServer.baseUrl, "GET", "/api/admin/mailboxes", undefined, administratorCookie);
     assert.equal(arrayOf(mailboxes.payload.mailboxes).length, 2);
 
     const wrongPassword = await requestJson(consoleServer.baseUrl, "POST", "/api/session", {
@@ -195,7 +195,7 @@ describe("web console interface", { concurrency: 1 }, () => {
     const replaced = await requestJson(
       consoleServer.baseUrl,
       "POST",
-      "/api/mailboxes/password",
+      "/api/admin/mailboxes/password",
       { address: "bea@acme.test", password: "changed-horse" },
       administratorCookie
     );
@@ -205,7 +205,7 @@ describe("web console interface", { concurrency: 1 }, () => {
     const disableSelf = await requestJson(
       consoleServer.baseUrl,
       "POST",
-      "/api/mailboxes/access",
+      "/api/admin/mailboxes/access",
       { address: "ada@acme.test", disabled: true },
       administratorCookie
     );
@@ -213,7 +213,7 @@ describe("web console interface", { concurrency: 1 }, () => {
     const disabled = await requestJson(
       consoleServer.baseUrl,
       "POST",
-      "/api/mailboxes/access",
+      "/api/admin/mailboxes/access",
       { address: "bea@acme.test", disabled: true },
       administratorCookie
     );
@@ -226,7 +226,7 @@ describe("web console interface", { concurrency: 1 }, () => {
     await requestJson(
       consoleServer.baseUrl,
       "POST",
-      "/api/mailboxes/access",
+      "/api/admin/mailboxes/access",
       { address: "bea@acme.test", disabled: false },
       administratorCookie
     );
@@ -236,12 +236,12 @@ describe("web console interface", { concurrency: 1 }, () => {
     });
     memberCookie = memberAgain.cookieHeader;
 
-    const settings = await requestJson(consoleServer.baseUrl, "GET", "/api/settings", undefined, administratorCookie);
+    const settings = await requestJson(consoleServer.baseUrl, "GET", "/api/admin/settings", undefined, administratorCookie);
     assert.equal(record(record(settings.payload.settings).relay).passwordSaved, false);
     const invalidRelay = await requestJson(
       consoleServer.baseUrl,
       "PUT",
-      "/api/settings",
+      "/api/admin/settings",
       { publicHostname: "", relay: { enabled: true, host: "", port: 587, username: "", password: "", security: "starttls" } },
       administratorCookie
     );
@@ -249,7 +249,7 @@ describe("web console interface", { concurrency: 1 }, () => {
     const insecureRelay = await requestJson(
       consoleServer.baseUrl,
       "PUT",
-      "/api/settings",
+      "/api/admin/settings",
       { publicHostname: "", relay: { enabled: false, host: "smtp.example.test", port: 25, username: "", password: "", security: "plain" } },
       administratorCookie
     );
@@ -257,7 +257,7 @@ describe("web console interface", { concurrency: 1 }, () => {
     const saved = await requestJson(
       consoleServer.baseUrl,
       "PUT",
-      "/api/settings",
+      "/api/admin/settings",
       {
         publicHostname: "mail.acme.test",
         relay: { enabled: false, host: "smtp.example.test", port: 465, username: "ada", password: "relay-secret", security: "tls" }
@@ -269,7 +269,7 @@ describe("web console interface", { concurrency: 1 }, () => {
     assert.equal(record(record(saved.payload.settings).relay).security, "tls");
     assert.equal(record(record(saved.payload.settings).relay).passwordSaved, true);
     assert.equal(JSON.stringify(saved.payload).includes("relay-secret"), false);
-    const memberSettings = await requestJson(consoleServer.baseUrl, "GET", "/api/settings", undefined, memberCookie);
+    const memberSettings = await requestJson(consoleServer.baseUrl, "GET", "/api/admin/settings", undefined, memberCookie);
     assert.equal(memberSettings.status, 403);
   });
 
@@ -554,7 +554,7 @@ describe("web console interface", { concurrency: 1 }, () => {
     const namedMailbox = await requestJson(
       consoleServer.baseUrl,
       "GET",
-      "/api/mailboxes/bea@acme.test/messages",
+      "/api/admin/mailboxes/bea@acme.test/messages",
       undefined,
       administratorCookie
     );
@@ -670,12 +670,12 @@ describe("web console interface", { concurrency: 1 }, () => {
     assert.equal(invalid.status, 400);
     const missing = await requestJson(consoleServer.baseUrl, "GET", "/api/missing", undefined, administratorCookie);
     assert.equal(missing.status, 404);
-    const summary = await requestJson(consoleServer.baseUrl, "GET", "/api/activity/summary", undefined, administratorCookie);
+    const summary = await requestJson(consoleServer.baseUrl, "GET", "/api/admin/activity/summary", undefined, administratorCookie);
     assert.equal(summary.status, 200);
     assert.equal(Array.isArray(summary.payload.days), true);
-    const memberSummary = await requestJson(consoleServer.baseUrl, "GET", "/api/activity/summary", undefined, memberCookie);
+    const memberSummary = await requestJson(consoleServer.baseUrl, "GET", "/api/admin/activity/summary", undefined, memberCookie);
     assert.equal(memberSummary.status, 403);
-    const events = await requestJson(consoleServer.baseUrl, "GET", "/api/activity?search=Protocol", undefined, administratorCookie);
+    const events = await requestJson(consoleServer.baseUrl, "GET", "/api/admin/activity?search=Protocol", undefined, administratorCookie);
     assert.equal(events.status, 200);
     assert.equal(arrayOf(events.payload.events).length > 0, true);
   });
@@ -684,7 +684,7 @@ describe("web console interface", { concurrency: 1 }, () => {
     const createdCopy = await requestJson(
       consoleServer.baseUrl,
       "POST",
-      "/api/mailboxes",
+      "/api/admin/mailboxes",
       { address: "cy@acme.test", displayName: "Cy Copy", password: "copy-horse" },
       administratorCookie
     );
@@ -692,7 +692,7 @@ describe("web console interface", { concurrency: 1 }, () => {
     const createdBlind = await requestJson(
       consoleServer.baseUrl,
       "POST",
-      "/api/mailboxes",
+      "/api/admin/mailboxes",
       { address: "dee@acme.test", displayName: "Dee Hidden", password: "blind-horse" },
       administratorCookie
     );
@@ -791,17 +791,17 @@ describe("web console interface", { concurrency: 1 }, () => {
   });
 
   it("lists failed email and resends the selection or every waiting message", async () => {
-    const unsigned = await requestJson(consoleServer.baseUrl, "GET", "/api/failed-email");
+    const unsigned = await requestJson(consoleServer.baseUrl, "GET", "/api/admin/failed-email");
     assert.equal(unsigned.status, 401);
-    const unsignedResend = await requestJson(consoleServer.baseUrl, "POST", "/api/failed-email/resend", { identifiers: [] });
+    const unsignedResend = await requestJson(consoleServer.baseUrl, "POST", "/api/admin/failed-email/resend", { identifiers: [] });
     assert.equal(unsignedResend.status, 401);
-    const forbidden = await requestJson(consoleServer.baseUrl, "GET", "/api/failed-email", undefined, memberCookie);
+    const forbidden = await requestJson(consoleServer.baseUrl, "GET", "/api/admin/failed-email", undefined, memberCookie);
     assert.equal(forbidden.status, 403);
-    const forbiddenResend = await requestJson(consoleServer.baseUrl, "POST", "/api/failed-email/resend", { identifiers: [] }, memberCookie);
+    const forbiddenResend = await requestJson(consoleServer.baseUrl, "POST", "/api/admin/failed-email/resend", { identifiers: [] }, memberCookie);
     assert.equal(forbiddenResend.status, 403);
-    const malformed = await requestJson(consoleServer.baseUrl, "POST", "/api/failed-email/resend", { identifiers: "all" }, administratorCookie);
+    const malformed = await requestJson(consoleServer.baseUrl, "POST", "/api/admin/failed-email/resend", { identifiers: "all" }, administratorCookie);
     assert.equal(malformed.status, 400);
-    const missingList = await requestJson(consoleServer.baseUrl, "POST", "/api/failed-email/resend", {}, administratorCookie);
+    const missingList = await requestJson(consoleServer.baseUrl, "POST", "/api/admin/failed-email/resend", {}, administratorCookie);
     assert.equal(missingList.status, 400);
 
     const queueDirectory = path.join(consoleServer.storageDirectory, "outbound-queue");
@@ -810,7 +810,7 @@ describe("web console interface", { concurrency: 1 }, () => {
     await writeJson(path.join(queueDirectory, `${firstIdentifier}.json`), queuedWebFailure(firstIdentifier, "one@example.test", "Web first failure"));
     await writeJson(path.join(queueDirectory, `${secondIdentifier}.json`), queuedWebFailure(secondIdentifier, "two@example.test", "Web second failure"));
 
-    const listed = await requestJson(consoleServer.baseUrl, "GET", "/api/failed-email", undefined, administratorCookie);
+    const listed = await requestJson(consoleServer.baseUrl, "GET", "/api/admin/failed-email", undefined, administratorCookie);
     assert.equal(listed.status, 200);
     const messages = arrayOf(listed.payload.messages).map((message) => record(message));
     assert.deepEqual(messages.map((message) => String(message.subject)).sort(), ["Web first failure", "Web second failure"]);
@@ -820,7 +820,7 @@ describe("web console interface", { concurrency: 1 }, () => {
     const selected = await requestJson(
       consoleServer.baseUrl,
       "POST",
-      "/api/failed-email/resend",
+      "/api/admin/failed-email/resend",
       { identifiers: [` ${firstIdentifier} `, firstIdentifier] },
       administratorCookie
     );
@@ -834,20 +834,20 @@ describe("web console interface", { concurrency: 1 }, () => {
     const missing = await requestJson(
       consoleServer.baseUrl,
       "POST",
-      "/api/failed-email/resend",
+      "/api/admin/failed-email/resend",
       { identifiers: ["missing-message"] },
       administratorCookie
     );
     assert.equal(missing.status, 404);
-    const remaining = await requestJson(consoleServer.baseUrl, "GET", "/api/failed-email", undefined, administratorCookie);
+    const remaining = await requestJson(consoleServer.baseUrl, "GET", "/api/admin/failed-email", undefined, administratorCookie);
     assert.equal(arrayOf(remaining.payload.messages).length, 1);
 
-    const everyMessage = await requestJson(consoleServer.baseUrl, "POST", "/api/failed-email/resend", { identifiers: [] }, administratorCookie);
+    const everyMessage = await requestJson(consoleServer.baseUrl, "POST", "/api/admin/failed-email/resend", { identifiers: [] }, administratorCookie);
     assert.equal(everyMessage.status, 200);
     assert.deepEqual(everyMessage.payload.sent, [secondIdentifier]);
     assert.deepEqual(everyMessage.payload.stillWaiting, []);
     assert.equal(consoleServer.sink.messages.some((message) => message.includes("Web second failure")), true);
-    const empty = await requestJson(consoleServer.baseUrl, "GET", "/api/failed-email", undefined, administratorCookie);
+    const empty = await requestJson(consoleServer.baseUrl, "GET", "/api/admin/failed-email", undefined, administratorCookie);
     assert.deepEqual(empty.payload.messages, []);
   });
 });

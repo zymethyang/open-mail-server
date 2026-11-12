@@ -26,10 +26,10 @@ function certificateKind(certificate: CertificateDescription): string {
   }
   const intermediateCount = certificate.intermediateCount || 0;
   if (intermediateCount === 1) {
-    return "Issued by a certificate authority, with the intermediate certificate";
+    return "Issued by a certificate authority, with intermediate";
   }
   if (intermediateCount > 1) {
-    return `Issued by a certificate authority, with ${intermediateCount} intermediate certificates`;
+    return `Issued by a certificate authority, with ${intermediateCount} intermediates`;
   }
   return "Issued by a certificate authority";
 }
@@ -37,7 +37,7 @@ function certificateKind(certificate: CertificateDescription): string {
 function certificateMarkup(certificate: CertificateDescription): string {
   const names = certificate.names && certificate.names.length ? certificate.names.join(", ") : "None listed";
   const renewal = certificate.renewalRequired
-    ? `<p class="hint">This certificate expires in ${certificate.daysRemaining ?? 0} days. A self-signed certificate is replaced automatically. An uploaded certificate needs a new file before it expires.</p>`
+    ? `<p class="hint">Expires in ${certificate.daysRemaining ?? 0} days. Self-signed renews automatically; uploaded certificates need a new file.</p>`
     : "";
   return `<dl class="record-list">
     <div><dt>Subject</dt><dd>${escapeHtml(certificate.subject)}</dd></div>
@@ -67,7 +67,7 @@ function relaySelection(): { port: number; security: string } {
 
 function settingsRequestBody(): string {
   const relay = relaySelection();
-    return JSON.stringify({
+  return JSON.stringify({
     publicHostname: element<HTMLInputElement>("#settings-hostname").value,
     relay: {
       enabled: element<HTMLInputElement>("#settings-relay-enabled").checked,
@@ -107,28 +107,115 @@ async function saveSettings(): Promise<void> {
   } catch (error) {
     const message = errorMessage(error);
     const field = settingsErrorField(message);
-    if (field !== "settings-hostname") {
-      settingsForm.querySelector("details")?.setAttribute("open", "");
+    if (field === "settings-hostname") {
+      element<HTMLDetailsElement>("#settings-public-name").open = true;
+    } else {
+      element<HTMLDetailsElement>("#settings-outgoing-relay").open = true;
     }
     showFormError(settingsForm, settingsSummary, message, field);
   }
 }
 
+function presentBackupName(backupName: string): string {
+  const match = /^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/.exec(backupName);
+  if (!match) {
+    return backupName;
+  }
+  const parsed = Date.parse(`${match[1]}T${match[2]}:${match[3]}:${match[4]}.${match[5]}Z`);
+  if (Number.isNaN(parsed)) {
+    return backupName;
+  }
+  return new Date(parsed).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+}
+
+function backupListMarkup(backupNames: string[]): string {
+  if (!backupNames.length) {
+    return `<p id="backup-empty">No backups yet.</p>`;
+  }
+  const options = backupNames
+    .map(
+      (name, index) =>
+        `<label class="choice" for="backup-selection-${index}"><input id="backup-selection-${index}" type="radio" name="backup-selection" value="${escapeHtml(name)}"> ${escapeHtml(presentBackupName(name))}</label>`
+    )
+    .join("");
+  return `<fieldset id="backup-list" class="backup-list"><legend>Server backups</legend>${options}</fieldset>`;
+}
+
+function selectedBackupName(): string {
+  const selected = document.querySelector<HTMLInputElement>('input[name="backup-selection"]:checked');
+  return selected?.value || "";
+}
+
+function updateBackupActionButtons(): void {
+  const selected = Boolean(selectedBackupName());
+  element<HTMLButtonElement>("#restore-backup").disabled = !selected;
+  element<HTMLButtonElement>("#delete-backup").disabled = !selected;
+}
+
+function setBackupControlsDisabled(disabled: boolean): void {
+  element<HTMLButtonElement>("#create-backup").disabled = disabled;
+  element<HTMLButtonElement>("#backup-restore-confirm").disabled = disabled;
+  element<HTMLButtonElement>("#backup-delete-confirm").disabled = disabled;
+  document.querySelectorAll<HTMLInputElement>('input[name="backup-selection"]').forEach((input) => {
+    input.disabled = disabled;
+  });
+  if (disabled) {
+    element<HTMLButtonElement>("#restore-backup").disabled = true;
+    element<HTMLButtonElement>("#delete-backup").disabled = true;
+    return;
+  }
+  updateBackupActionButtons();
+}
+
+function bindBackupSelection(): void {
+  document.querySelectorAll<HTMLInputElement>('input[name="backup-selection"]').forEach((input) => {
+    input.addEventListener("change", () => {
+      updateBackupActionButtons();
+    });
+  });
+  updateBackupActionButtons();
+}
+
+async function refreshBackupList(summary: HTMLElement): Promise<void> {
+  const payload = await requestJson<{ backups: string[] }>(ApiEndpoint.Backup);
+  const listHost = element("#backup-list-host");
+  listHost.innerHTML = backupListMarkup(payload.backups || []);
+  bindBackupSelection();
+  summary.className = "notice";
+}
+
+async function delay(milliseconds: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function waitUntilServerReachable(maximumAttempts = 90, delayMilliseconds = 1000): Promise<boolean> {
+  const downtimeDeadline = Date.now() + 15_000;
+  let sawUnreachable = false;
+  while (!sawUnreachable && Date.now() < downtimeDeadline) {
+    try {
+      await fetch("/health", { credentials: "same-origin", cache: "no-store" });
+    } catch {
+      sawUnreachable = true;
+      break;
+    }
+    await delay(250);
+  }
+  for (let attempt = 0; attempt < maximumAttempts; attempt += 1) {
+    try {
+      const response = await fetch("/health", { credentials: "same-origin", cache: "no-store" });
+      if (response.status > 0) {
+        return true;
+      }
+    } catch {
+      // Server is still restarting.
+    }
+    await delay(delayMilliseconds);
+  }
+  return false;
+}
+
 function bindCertificateCard(): void {
   const summary = element<HTMLElement>("#certificate-summary");
-  element<HTMLButtonElement>("#create-backup").addEventListener("click", () => {
-    summary.className = "notice";
-    summary.hidden = false;
-    summary.innerHTML = "<h2>Creating backup</h2><p>The mail store and storage key are being copied.</p>";
-    void requestJson<{ backupName: string }>(ApiEndpoint.Backup, { method: "POST", body: "{}" })
-      .then((payload) => {
-        summary.innerHTML = `<h2>Backup created</h2><p>Saved as ${escapeHtml(payload.backupName)}.</p>`;
-      })
-      .catch((error: unknown) => {
-        summary.className = "error-summary";
-        summary.innerHTML = `<h2>There is a problem</h2><p>${escapeHtml(errorMessage(error))}</p>`;
-      });
-  });
   const dialog = element<HTMLDialogElement>("#certificate-dialog");
   const dialogSummary = element<HTMLElement>("#certificate-dialog-summary");
   requestJson<{ certificate: CertificateDescription }>(ApiEndpoint.Certificate)
@@ -185,11 +272,145 @@ function bindCertificateCard(): void {
   });
 }
 
+function bindBackupCard(initialBackups: string[]): void {
+  const summary = element<HTMLElement>("#backup-summary");
+  const listHost = element("#backup-list-host");
+  listHost.innerHTML = backupListMarkup(initialBackups);
+  bindBackupSelection();
+  const restoreDialog = element<HTMLDialogElement>("#backup-restore-dialog");
+  const deleteDialog = element<HTMLDialogElement>("#backup-delete-dialog");
+  element<HTMLButtonElement>("#create-backup").addEventListener("click", () => {
+    setBackupControlsDisabled(true);
+    summary.className = "notice";
+    summary.hidden = false;
+    summary.innerHTML = "<h2>Creating backup</h2><p>Copying the mail store and storage key.</p>";
+    void requestJson<{ backupName: string }>(ApiEndpoint.Backup, { method: "POST", body: "{}" })
+      .then(async (payload) => {
+        await refreshBackupList(summary);
+        setBackupControlsDisabled(false);
+        summary.hidden = false;
+        summary.innerHTML = `<h2>Backup created</h2><p>Saved as ${escapeHtml(presentBackupName(payload.backupName))}.</p>`;
+      })
+      .catch((error: unknown) => {
+        summary.className = "error-summary";
+        summary.hidden = false;
+        summary.innerHTML = `<h2>There is a problem</h2><p>${escapeHtml(errorMessage(error))}</p>`;
+        setBackupControlsDisabled(false);
+        summary.focus();
+      });
+  });
+  element<HTMLButtonElement>("#delete-backup").addEventListener("click", () => {
+    if (!selectedBackupName()) {
+      return;
+    }
+    deleteDialog.showModal();
+  });
+  element<HTMLButtonElement>("#backup-delete-cancel").addEventListener("click", () => {
+    deleteDialog.close();
+  });
+  element<HTMLButtonElement>("#backup-delete-confirm").addEventListener("click", () => {
+    const backupName = selectedBackupName();
+    if (!backupName) {
+      deleteDialog.close();
+      return;
+    }
+    const label = presentBackupName(backupName);
+    deleteDialog.close();
+    setBackupControlsDisabled(true);
+    summary.className = "notice";
+    summary.hidden = false;
+    summary.innerHTML = "<h2>Deleting backup</h2><p>Removing the selected server backup.</p>";
+    void requestJson<{ deleted: boolean; backupName: string }>(ApiEndpoint.Backup, {
+      method: "DELETE",
+      body: JSON.stringify({ backupName })
+    })
+      .then(async () => {
+        await refreshBackupList(summary);
+        setBackupControlsDisabled(false);
+        summary.hidden = false;
+        summary.innerHTML = `<h2>Backup deleted</h2><p>Removed ${escapeHtml(label)}.</p>`;
+        summary.focus();
+      })
+      .catch((error: unknown) => {
+        summary.className = "error-summary";
+        summary.hidden = false;
+        summary.innerHTML = `<h2>There is a problem</h2><p>${escapeHtml(errorMessage(error))}</p>`;
+        setBackupControlsDisabled(false);
+        summary.focus();
+      });
+  });
+  element<HTMLButtonElement>("#restore-backup").addEventListener("click", () => {
+    if (!selectedBackupName()) {
+      return;
+    }
+    restoreDialog.showModal();
+  });
+  element<HTMLButtonElement>("#backup-restore-cancel").addEventListener("click", () => {
+    restoreDialog.close();
+  });
+  element<HTMLButtonElement>("#backup-restore-confirm").addEventListener("click", () => {
+    const backupName = selectedBackupName();
+    if (!backupName) {
+      restoreDialog.close();
+      return;
+    }
+    restoreDialog.close();
+    setBackupControlsDisabled(true);
+    summary.className = "notice";
+    summary.hidden = false;
+    summary.innerHTML = "<h2>Restoring…</h2><p>Replacing the mail store and storage key.</p>";
+    void requestJson<{ restored: boolean; backupName: string; restarting?: boolean }>(ApiEndpoint.BackupRestore, {
+      method: "POST",
+      body: JSON.stringify({ backupName })
+    })
+      .then(async () => {
+        await finishRestoreReconnect(summary);
+      })
+      .catch(async (error: unknown) => {
+        if (error instanceof TypeError) {
+          await finishRestoreReconnect(summary);
+          return;
+        }
+        summary.className = "error-summary";
+        summary.hidden = false;
+        summary.innerHTML = `<h2>There is a problem</h2><p>${escapeHtml(errorMessage(error))}</p>`;
+        setBackupControlsDisabled(false);
+        summary.focus();
+      });
+  });
+}
+
+async function finishRestoreReconnect(summary: HTMLElement): Promise<void> {
+  summary.className = "notice";
+  summary.hidden = false;
+  summary.innerHTML = "<h2>Reconnecting…</h2><p>Waiting for the server to come back.</p>";
+  const reachable = await waitUntilServerReachable();
+  if (!reachable) {
+    summary.className = "error-summary";
+    summary.hidden = false;
+    summary.innerHTML =
+      "<h2>There is a problem</h2><p>Could not reconnect to the server. Refresh the page when it is available.</p>";
+    setBackupControlsDisabled(false);
+    summary.focus();
+    return;
+  }
+  try {
+    await refreshBackupList(summary);
+  } catch {
+  }
+  setBackupControlsDisabled(false);
+  summary.className = "notice";
+  summary.hidden = false;
+  summary.innerHTML = "<h2>Backup restored</h2><p>The mail store and storage key are in place again.</p>";
+  summary.focus();
+}
+
 async function renderSettings(saved = false): Promise<void> {
   const generation = currentRouteGeneration();
-  const [payload, summary] = await Promise.all([
+  const [payload, summary, backupsPayload] = await Promise.all([
     requestJson<{ settings: ServerSettings }>(ApiEndpoint.Settings),
-    requestJson<ActivitySummary>(ApiEndpoint.ActivitySummary)
+    requestJson<ActivitySummary>(ApiEndpoint.ActivitySummary),
+    requestJson<{ backups: string[] }>(ApiEndpoint.Backup)
   ]);
   if (applicationState.bootstrap) {
     applicationState.bootstrap.hosting = summary.hosting;
@@ -206,41 +427,16 @@ async function renderSettings(saved = false): Promise<void> {
   replaceMainContent(`
     <header class="page-header"><div><p class="eyebrow">Configuration</p><h1>Settings</h1></div></header>
     ${savedNotice}
-    <form id="settings-form" class="card">
-      <div id="settings-summary" class="error-summary" tabindex="-1" hidden></div>
-      <h2>Public name</h2>
-      <label for="settings-hostname">Hostname</label>
-      <input id="settings-hostname" value="${escapeHtml(settings.publicHostname)}" placeholder="mail.example.com">
-      <p class="hint">This name is used in the mail greeting and the DNS guide. Leave it empty to use the company domain.</p>
-      <h2>Storage limits</h2>
-      <label for="settings-message-megabytes">Maximum message size in megabytes</label>
-      <input id="settings-message-megabytes" type="number" min="1" max="48" value="${messageMegabytes}">
-      <label for="settings-quota-megabytes">Mailbox quota in megabytes</label>
-      <input id="settings-quota-megabytes" type="number" min="1" value="${quotaMegabytes}">
-      <label for="settings-connection-limit">Unauthenticated mail connections</label>
-      <input id="settings-connection-limit" type="number" min="1" max="500" value="${limits?.maximumUnauthenticatedConnections ?? 20}">
-      <label for="settings-message-limit">Unauthenticated messages per connection</label>
-      <input id="settings-message-limit" type="number" min="1" max="1000" value="${limits?.maximumUnauthenticatedMessages ?? 20}">
-      ${fold(`Outgoing relay<span class="fold-status">${relay.enabled ? "On" : "Off"}</span>`, `<label class="choice" for="settings-relay-enabled"><input id="settings-relay-enabled" type="checkbox" ${relay.enabled ? "checked" : ""}> Send external mail through a relay</label>
-      <label for="settings-relay-host">Relay host</label>
-      <input id="settings-relay-host" value="${escapeHtml(relay.host)}" placeholder="smtp.example.net">
-      <label for="settings-relay-port">Port</label>
-      <select id="settings-relay-port">
-        <option value="${ServerPort.SmtpSubmission}" ${secureRelaySelected ? "" : "selected"}>${ServerPort.SmtpSubmission} STARTTLS</option>
-        <option value="${ServerPort.SmtpSecure}" ${secureRelaySelected ? "selected" : ""}>${ServerPort.SmtpSecure} TLS</option>
-      </select>
-      <label for="settings-relay-username">Username</label>
-      <input id="settings-relay-username" value="${escapeHtml(relay.username)}" autocomplete="off">
-      <label for="settings-relay-password">Password</label>
-      <input id="settings-relay-password" type="password" autocomplete="new-password" placeholder="${relay.passwordSaved ? "Saved. Enter a new password to replace it." : ""}">`, relay.enabled)}
-      <div class="form-actions"><button class="primary-button" type="submit">Save settings</button></div>
-    </form>
     <section class="card stack-card" id="certificate-card">
       <h2>Certificate</h2>
       <div id="certificate-summary" class="error-summary" tabindex="-1" hidden></div>
-      <div id="certificate-details"><p class="hint">Loading the current certificate.</p></div>
-      <p class="hint">The web console on port ${ServerPort.Web} uses this certificate. A missing certificate is created in the storage directory when the server starts. An existing certificate is kept there and is not written into the source tree.</p>
-      <div class="form-actions"><button id="create-backup" class="quiet-button" type="button">Create backup</button><button id="certificate-upload-button" class="quiet-button" type="button">Upload certificate</button></div>
+      ${fold(
+        "Certificate details",
+        `<div id="certificate-details"><p class="hint">Loading the current certificate.</p></div>`,
+        true
+      )}
+      <p class="hint">The web console on port ${ServerPort.Web} uses this certificate. Upload a PEM certificate and private key to replace it.</p>
+      <div class="form-actions"><button id="certificate-upload-button" class="quiet-button" type="button">Upload certificate</button></div>
     </section>
     <dialog id="certificate-dialog" class="modal" aria-labelledby="certificate-dialog-title">
       <form id="certificate-form">
@@ -252,7 +448,7 @@ async function renderSettings(saved = false): Promise<void> {
         <input id="certificate-chain-file" type="file" accept=".pem,.crt,.cer,.ca-bundle">
         <label for="private-key-file">Private key file</label>
         <input id="private-key-file" type="file" accept=".pem,.key">
-        <p class="hint">Use the PEM certificate and private key from your provider. If the intermediate certificates arrived in a separate bundle, add that file. Mail uses them immediately.</p>
+        <p class="hint">Upload the PEM certificate and private key. Add the intermediate file if you have one. Mail uses them immediately.</p>
         <div class="form-actions">
           <button id="certificate-cancel" class="quiet-button" type="button">Cancel</button>
           <button class="primary-button" type="submit">Upload</button>
@@ -260,8 +456,81 @@ async function renderSettings(saved = false): Promise<void> {
       </form>
     </dialog>
     ${renderDnsRecords(summary.hosting)}
-    ${fold("Listeners", listenerList(summary.listeners, summary.publicPorts))}`, generation, currentRouteGeneration());
-  if (generation !== currentRouteGeneration()) {
+    <form id="settings-form" class="card">
+      <div id="settings-summary" class="error-summary" tabindex="-1" hidden></div>
+      ${fold(
+        "Public name",
+        `<label for="settings-hostname">Hostname</label>
+      <input id="settings-hostname" value="${escapeHtml(settings.publicHostname)}" placeholder="mail.example.com">
+      <p class="hint">Used in the mail greeting and DNS guide. Leave empty to use the company domain.</p>`,
+        false,
+        "settings-public-name"
+      )}
+      ${fold(
+        "Storage limits",
+        `<label for="settings-message-megabytes">Maximum message size in megabytes</label>
+      <input id="settings-message-megabytes" type="number" min="1" max="48" value="${messageMegabytes}">
+      <label for="settings-quota-megabytes">Mailbox quota in megabytes</label>
+      <input id="settings-quota-megabytes" type="number" min="1" value="${quotaMegabytes}">
+      <label for="settings-connection-limit">Unauthenticated mail connections</label>
+      <input id="settings-connection-limit" type="number" min="1" max="500" value="${limits?.maximumUnauthenticatedConnections ?? 20}">
+      <label for="settings-message-limit">Unauthenticated messages per connection</label>
+      <input id="settings-message-limit" type="number" min="1" max="1000" value="${limits?.maximumUnauthenticatedMessages ?? 20}">`,
+        false,
+        "settings-storage-limits"
+      )}
+      ${fold(
+        `Outgoing relay<span class="fold-status">${relay.enabled ? "On" : "Off"}</span>`,
+        `<label class="choice" for="settings-relay-enabled"><input id="settings-relay-enabled" type="checkbox" ${relay.enabled ? "checked" : ""}> Send external mail through a relay</label>
+      <label for="settings-relay-host">Relay host</label>
+      <input id="settings-relay-host" value="${escapeHtml(relay.host)}" placeholder="smtp.example.net">
+      <label for="settings-relay-port">Port</label>
+      <select id="settings-relay-port">
+        <option value="${ServerPort.SmtpSubmission}" ${secureRelaySelected ? "" : "selected"}>${ServerPort.SmtpSubmission} STARTTLS</option>
+        <option value="${ServerPort.SmtpSecure}" ${secureRelaySelected ? "selected" : ""}>${ServerPort.SmtpSecure} TLS</option>
+      </select>
+      <label for="settings-relay-username">Username</label>
+      <input id="settings-relay-username" value="${escapeHtml(relay.username)}" autocomplete="off">
+      <label for="settings-relay-password">Password</label>
+      <input id="settings-relay-password" type="password" autocomplete="new-password" placeholder="${relay.passwordSaved ? "Saved. Enter a new password to replace it." : ""}">`,
+        relay.enabled,
+        "settings-outgoing-relay"
+      )}
+      <div class="form-actions"><button class="primary-button" type="submit">Save settings</button></div>
+    </form>
+    <section class="card stack-card" id="backup-card">
+      <h2>Backup</h2>
+      <div id="backup-summary" class="error-summary" tabindex="-1" hidden></div>
+      ${fold(
+        "Create and restore",
+        `<div class="form-actions"><button id="create-backup" class="quiet-button" type="button">Create backup</button></div>
+      <div id="backup-list-host"></div>
+      <p class="hint">Restore replaces the mail store and storage key. The server restarts briefly to finish.</p>
+      <div class="form-actions">
+        <button id="delete-backup" class="danger-button" type="button" disabled>Delete</button>
+        <button id="restore-backup" class="caution-button" type="button" disabled>Restore</button>
+      </div>`,
+        false,
+        "settings-backup"
+      )}
+    </section>
+    <dialog id="backup-restore-dialog" class="modal" aria-labelledby="backup-restore-dialog-title">
+      <h2 id="backup-restore-dialog-title">Restore this backup?</h2>
+      <p>This replaces the mail store and storage key. The server restarts briefly; the console reconnects when it is ready.</p>
+      <div class="form-actions">
+        <button id="backup-restore-cancel" class="quiet-button" type="button">Cancel</button>
+        <button id="backup-restore-confirm" class="caution-button" type="button">Restore</button>
+      </div>
+    </dialog>
+    <dialog id="backup-delete-dialog" class="modal" aria-labelledby="backup-delete-dialog-title">
+      <h2 id="backup-delete-dialog-title">Delete this backup?</h2>
+      <p>This permanently removes the selected server backup. The live mail store is not changed.</p>
+      <div class="form-actions">
+        <button id="backup-delete-cancel" class="quiet-button" type="button">Cancel</button>
+        <button id="backup-delete-confirm" class="danger-button" type="button">Delete</button>
+      </div>
+    </dialog>
+    ${fold("Listeners", listenerList(summary.listeners, summary.publicPorts), false, "settings-listeners")}`, generation, currentRouteGeneration());  if (generation !== currentRouteGeneration()) {
     return;
   }
   element<HTMLFormElement>("#settings-form").addEventListener("submit", (event) => {
@@ -269,6 +538,7 @@ async function renderSettings(saved = false): Promise<void> {
     void saveSettings();
   });
   bindCertificateCard();
+  bindBackupCard(backupsPayload.backups || []);
   bindDnsRecordCopies();
 }
 

@@ -1,5 +1,4 @@
 import { ApiEndpoint } from "../../enums/apiEndpoint.js";
-import { ServerPort } from "../../enums/serverPort.js";
 import { requestJson } from "../../http/jsonClient.js";
 import type { ActivityEvent } from "../../interfaces/models.js";
 import type { Page } from "../../interfaces/page.js";
@@ -26,7 +25,7 @@ async function loadLogs(): Promise<void> {
     return;
   }
   if (!payload.events.length) {
-    target.innerHTML = `<div class="empty"><h2>No matching log entries</h2><p>Mail received on port ${ServerPort.Smtp} and mail sent by signed-in users will appear here.</p></div>`;
+    target.innerHTML = `<div class="empty"><h2>No matching log entries</h2><p>Inbound and outbound mail for this server appears here.</p></div>`;
     return;
   }
   const rows = payload.events

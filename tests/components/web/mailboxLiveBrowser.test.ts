@@ -37,8 +37,8 @@ describe("live mailbox", () => {
       assert.equal(setup.status, 201);
       await browser.openAddress(`${consoleServer.baseUrl}/`);
       await browser.signIn("ada@acme.test", "correct-horse");
-      await browser.followHash("#mailbox");
-      await browser.waitUntil("The mailbox should open", (page) => page.mailboxOpen && page.hash === "#mailbox");
+      await browser.followPath("/mailbox");
+      await browser.waitUntil("The mailbox should open", (page) => page.mailboxOpen && page.pathName.startsWith("/mailbox"));
       await waitFor(
         browser,
         "The mailbox stream should be open",
@@ -64,13 +64,13 @@ describe("live mailbox", () => {
           return JSON.stringify({
             subjects,
             pageToken: window.mailboxPageToken || "",
-            hash: location.hash
+            pathName: location.pathname
           });
         })()`
       );
-      const parsed = JSON.parse(listed) as { subjects: string[]; pageToken: string; hash: string };
+      const parsed = JSON.parse(listed) as { subjects: string[]; pageToken: string; pathName: string };
       assert.equal(parsed.pageToken, "still-here");
-      assert.equal(parsed.hash, "#mailbox");
+      assert.equal(parsed.pathName.startsWith("/mailbox"), true);
       assert.equal(parsed.subjects.includes("Live mailbox arrival"), true);
     } finally {
       await browser.close();

@@ -37,13 +37,13 @@ describe("certificate authority chain", { concurrency: 1 }, () => {
     assert.equal(setup.status, 201);
     const cookie = sessionCookie(setup);
     const baseUrl = `http://127.0.0.1:${listenerPort(server(), "Web", "HTTP")}`;
-    const missingIntermediate = await fetch(`${baseUrl}/api/certificate`, {
+    const missingIntermediate = await fetch(`${baseUrl}/api/admin/certificate`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Cookie: cookie },
       body: JSON.stringify({ certificate: issued.certificate, privateKey: issued.privateKey })
     });
     assert.equal(missingIntermediate.status, 400);
-    const uploaded = await fetch(`${baseUrl}/api/certificate`, {
+    const uploaded = await fetch(`${baseUrl}/api/admin/certificate`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Cookie: cookie },
       body: JSON.stringify({

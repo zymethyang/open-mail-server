@@ -188,6 +188,9 @@ async function startService(runtime: MailRuntime): Promise<void> {
         applyCertificate(runtime.certificate, servers);
         publishCertificateReplacement();
         return description;
+      },
+      requestProcessRestart() {
+        thread.postMessage({ kind: WorkerMessageKind.ShutdownRequested });
       }
     });
     await remember(

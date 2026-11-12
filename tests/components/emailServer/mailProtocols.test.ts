@@ -295,7 +295,7 @@ describe("mail protocol flow", { concurrency: 1 }, () => {
   });
 
   it("refuses a signed-in mailbox that sends as another mailbox", async () => {
-    const created = await fetch(`http://127.0.0.1:${listenerPort(server(), "Web", "HTTP")}/api/mailboxes`, {
+    const created = await fetch(`http://127.0.0.1:${listenerPort(server(), "Web", "HTTP")}/api/admin/mailboxes`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Cookie: administratorCookie },
       body: JSON.stringify({ address: "bea@acme.test", displayName: "Bea Member", password: "member-horse" })
@@ -384,7 +384,7 @@ describe("mail protocol flow", { concurrency: 1 }, () => {
   });
 
   it("records the accepted message in the activity log", async () => {
-    const response = await fetch(`http://127.0.0.1:${listenerPort(server(), "Web", "HTTP")}/api/activity?search=Protocol`, {
+    const response = await fetch(`http://127.0.0.1:${listenerPort(server(), "Web", "HTTP")}/api/admin/activity?search=Protocol`, {
       headers: { Cookie: administratorCookie }
     });
     const payload = (await response.json()) as { events?: Array<{ subject: string }> };

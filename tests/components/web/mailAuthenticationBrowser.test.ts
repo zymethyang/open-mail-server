@@ -37,7 +37,7 @@ describe("mail authentication in the browser", () => {
       assert.equal(setup.status, 201);
       await browser.openAddress(`${consoleServer.baseUrl}/`);
       await browser.signIn("ada@acme.test", "correct-horse");
-      await browser.followHash("#settings");
+      await browser.followPath("/admin/settings");
       const text = await waitFor(
         browser,
         "The DNS records should include SPF, DKIM, and DMARC",

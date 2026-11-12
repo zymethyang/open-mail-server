@@ -5,5 +5,6 @@ export enum WorkerMessageKind {
   Listeners = "listeners",
   Ready = "ready",
   Failed = "failed",
-  Stop = "stop"
+  Stop = "stop",
+  ShutdownRequested = "shutdown-requested"
 }

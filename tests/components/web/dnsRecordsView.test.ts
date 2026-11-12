@@ -21,7 +21,7 @@ describe("dns records view", () => {
     assert.equal(markup.includes("Public address not found"), false);
     assert.equal(markup.includes("Copy DNS records"), true);
     assert.equal(markup.includes("Copy for Cloudflare"), false);
-    assert.equal(markup.includes("At the company DNS host, point acme.test at this server"), true);
+    assert.equal(markup.includes("At your DNS host, point acme.test at this server"), true);
     assert.equal(markup.includes("v=spf1 ip4:192.168.1.90 ~all"), true);
     assert.equal(markup.includes("v=DKIM1; k=rsa; p=public"), true);
     assert.equal(markup.includes("v=DMARC1; p=none; rua=mailto:admin@acme.test"), true);

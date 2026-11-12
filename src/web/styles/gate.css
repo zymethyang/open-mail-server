@@ -1,9 +1,252 @@
 .gate {
+  --gate-ink: #0c1b2a;
+  --gate-ink-muted: #3d4f63;
+  --gate-surface: #ffffff;
+  --gate-surface-border: #c5d0de;
+  --gate-primary: #0b57d0;
+  --gate-on-primary: #ffffff;
+  --gate-primary-hover: #0842a0;
+  --gate-ring: #0b57d0;
+  --gate-atmosphere-a: #d9e7f6;
+  --gate-atmosphere-b: #eef3f8;
+  --gate-atmosphere-c: #cfe0f0;
+  --gate-accent: #0f766e;
+  --gate-error-bg: #fef2f2;
+  --gate-error-fg: #991b1b;
+  --gate-shadow: 0 8px 24px rgba(12, 27, 42, 0.08);
+  --gate-font-display: "Outfit", "Segoe UI", "Helvetica Neue", sans-serif;
+  --gate-font-body: "Work Sans", "Segoe UI", "Helvetica Neue", sans-serif;
+  --gate-motion-enter: 420ms;
+  --gate-motion-step: 240ms;
+  --gate-motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  position: relative;
+  isolation: isolate;
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(280px, 420px);
-  gap: var(--space-6);
-  align-items: start;
+  grid-template-columns: minmax(0, 1.15fr) minmax(320px, 420px);
+  gap: clamp(24px, 4vw, 48px);
+  align-items: center;
   min-height: 100vh;
-  padding: 72px var(--space-6) var(--space-6);
+  padding: clamp(32px, 6vw, 72px) clamp(20px, 4vw, 48px);
+  color: var(--gate-ink);
+  font-family: var(--gate-font-body);
+  background:
+    linear-gradient(135deg, var(--gate-atmosphere-a) 0%, var(--gate-atmosphere-b) 46%, var(--gate-atmosphere-c) 100%);
+  overflow: hidden;
 }
-.gate-copy { max-width: 560px; }
+
+.gate-atmosphere {
+  position: absolute;
+  inset: -12% -8%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 18% 22%, rgba(11, 87, 208, 0.14), transparent 42%),
+    radial-gradient(circle at 82% 78%, rgba(15, 118, 110, 0.12), transparent 46%),
+    repeating-linear-gradient(
+      -18deg,
+      rgba(12, 27, 42, 0.035) 0 1px,
+      transparent 1px 14px
+    );
+  animation: gate-atmosphere-drift 24s linear infinite;
+}
+
+.gate > *:not(.gate-atmosphere) {
+  position: relative;
+  z-index: 1;
+}
+
+#setup-screen.gate {
+  align-items: start;
+  padding-block: 48px 32px;
+}
+
+.gate-copy {
+  max-width: 560px;
+}
+
+.gate-brand-mark {
+  display: block;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 20px;
+  opacity: 0;
+  transform: translateY(14px);
+  animation: gate-enter var(--gate-motion-enter) var(--gate-motion-ease) forwards;
+}
+
+.gate-product-name {
+  margin: 0 0 12px;
+  color: var(--gate-accent);
+  font-family: var(--gate-font-display);
+  font-size: clamp(28px, 4vw, 40px);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  text-transform: none;
+  opacity: 0;
+  transform: translateY(14px);
+  animation: gate-enter var(--gate-motion-enter) var(--gate-motion-ease) 80ms forwards;
+}
+
+.gate-copy h1 {
+  margin: 0 0 12px;
+  color: var(--gate-ink);
+  font-family: var(--gate-font-display);
+  font-size: clamp(32px, 4.5vw, 44px);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  opacity: 0;
+  transform: translateY(14px);
+  animation: gate-enter var(--gate-motion-enter) var(--gate-motion-ease) 160ms forwards;
+}
+
+.gate-copy p:not(.gate-product-name) {
+  margin: 0;
+  color: var(--gate-ink-muted);
+  font-size: 17px;
+  line-height: 1.55;
+  opacity: 0;
+  transform: translateY(14px);
+  animation: gate-enter var(--gate-motion-enter) var(--gate-motion-ease) 240ms forwards;
+}
+
+.gate .panel {
+  background: var(--gate-surface);
+  border: 1px solid var(--gate-surface-border);
+  border-radius: 16px;
+  box-shadow: var(--gate-shadow);
+  color: var(--gate-ink);
+  opacity: 0;
+  transform: translateY(14px);
+  animation: gate-enter var(--gate-motion-enter) var(--gate-motion-ease) 120ms forwards;
+  transition: box-shadow 180ms var(--gate-motion-ease);
+}
+
+.gate .panel:focus-within {
+  box-shadow: 0 12px 32px rgba(12, 27, 42, 0.12);
+}
+
+.gate .panel h2 {
+  margin: 0 0 16px;
+  color: var(--gate-ink);
+  font-family: var(--gate-font-display);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.gate .panel label {
+  color: var(--gate-ink);
+  font-family: var(--gate-font-body);
+  font-weight: 600;
+}
+
+.gate .panel input,
+.gate .panel select,
+.gate .panel textarea {
+  min-height: 44px;
+  border-color: var(--gate-surface-border);
+  border-radius: 12px;
+  background: var(--gate-surface);
+  color: var(--gate-ink);
+}
+
+.gate .panel input:hover,
+.gate .panel select:hover,
+.gate .panel textarea:hover {
+  border-color: var(--gate-primary);
+}
+
+.gate .panel .hint {
+  color: var(--gate-ink-muted);
+}
+
+.gate .panel .error-summary {
+  background: var(--gate-error-bg);
+  color: var(--gate-error-fg);
+  border-color: transparent;
+}
+
+.gate .primary-button {
+  border-radius: 12px;
+  background: var(--gate-primary);
+  color: var(--gate-on-primary);
+  border-color: var(--gate-primary);
+  font-family: var(--gate-font-body);
+  font-weight: 600;
+}
+
+.gate .primary-button:hover {
+  background: var(--gate-primary-hover);
+  border-color: var(--gate-primary-hover);
+}
+
+.gate .primary-button:active,
+.gate .quiet-button:active {
+  transform: scale(0.98);
+}
+
+.gate .quiet-button {
+  border-radius: 12px;
+  font-family: var(--gate-font-body);
+  font-weight: 600;
+}
+
+.gate :focus-visible {
+  outline: 2px solid var(--gate-ring);
+  outline-offset: 2px;
+}
+
+.gate-step-enter {
+  animation: gate-step-enter var(--gate-motion-step) var(--gate-motion-ease) both;
+}
+
+@keyframes gate-atmosphere-drift {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(-2.5%, 1.5%, 0); }
+}
+
+@keyframes gate-enter {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes gate-step-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gate-atmosphere {
+    animation: none;
+  }
+
+  .gate-brand-mark,
+  .gate-product-name,
+  .gate-copy h1,
+  .gate-copy p:not(.gate-product-name),
+  .gate .panel,
+  .gate-step-enter {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .gate .primary-button:active,
+  .gate .quiet-button:active {
+    transform: none;
+  }
+}

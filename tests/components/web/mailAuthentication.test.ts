@@ -16,7 +16,7 @@ describe("mail authentication records", { concurrency: 1 }, () => {
         password: "correct-horse"
       });
       assert.equal(setup.status, 201);
-      const summary = await requestJson(consoleServer.baseUrl, "GET", "/api/activity/summary", undefined, setup.cookieHeader);
+      const summary = await requestJson(consoleServer.baseUrl, "GET", "/api/admin/activity/summary", undefined, setup.cookieHeader);
       assert.equal(summary.status, 200);
       const hosting = record(summary.payload.hosting);
       const records = arrayOf(hosting.dns).map(record);

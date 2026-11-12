@@ -9,8 +9,10 @@ import type { SessionResponse } from "../../interfaces/sessionResponse.js";
 export function resetSignInStep(): void {
   const codeStep = element<HTMLElement>("#sign-in-code-step");
   const passwordStep = element<HTMLElement>("#sign-in-password-step");
+  codeStep.classList.remove("gate-step-enter");
   codeStep.hidden = true;
   passwordStep.hidden = false;
+  passwordStep.classList.add("gate-step-enter");
   element<HTMLElement>("#sign-in-back").hidden = true;
   const code = element<HTMLInputElement>("#sign-in-code");
   code.required = false;
@@ -47,8 +49,11 @@ export function bindSignIn(): void {
         })
       });
       if (payload.oneTimePasswordRequired) {
-        element<HTMLElement>("#sign-in-password-step").hidden = true;
+        const passwordStep = element<HTMLElement>("#sign-in-password-step");
+        passwordStep.classList.remove("gate-step-enter");
+        passwordStep.hidden = true;
         codeStep.hidden = false;
+        codeStep.classList.add("gate-step-enter");
         element<HTMLElement>("#sign-in-back").hidden = false;
         element<HTMLInputElement>("#sign-in-code").required = true;
         element<HTMLInputElement>("#sign-in-address").required = false;

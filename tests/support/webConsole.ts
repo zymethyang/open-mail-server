@@ -67,7 +67,14 @@ export async function requestJson(
   return { status: response.status, payload, cookieHeader: cookieHeader(lines) };
 }
 
-export async function startWebConsole(options: { configuredDomain?: string; serverName?: string; listenHost?: string; listenerStatus?: ListenerStatus[]; mailExchangeResolver?: (sink: SmtpSink) => MailExchangeResolver } = {}): Promise<RunningWebConsole> {
+export async function startWebConsole(options: {
+  configuredDomain?: string;
+  serverName?: string;
+  listenHost?: string;
+  listenerStatus?: ListenerStatus[];
+  mailExchangeResolver?: (sink: SmtpSink) => MailExchangeResolver;
+  requestProcessRestart?: () => void;
+} = {}): Promise<RunningWebConsole> {
   const storageDirectory = await createTemporaryStorage();
   const sink = await startSmtpSink();
   const configuration = testConfiguration(storageDirectory);
@@ -123,7 +130,8 @@ export async function startWebConsole(options: { configuredDomain?: string; serv
       certificate.privateKey = prepared.privateKey;
       certificate.certificate = prepared.certificate;
       return description;
-    }
+    },
+    requestProcessRestart: options.requestProcessRestart
   });
   const port = await startWebServer(server, 0, options.listenHost || "127.0.0.1");
   return {

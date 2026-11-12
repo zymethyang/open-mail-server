@@ -3,6 +3,7 @@ import { MailFolderName } from "../../enums/mailFolderName.js";
 import { requestJson } from "../../http/jsonClient.js";
 import type { MailFolder, MessageSummary } from "../../interfaces/models.js";
 import type { Page } from "../../interfaces/page.js";
+import { currentPathName, navigateTo } from "../../session/pathNavigation.js";
 import { applicationState } from "../../state/applicationState.js";
 import { element } from "../../utils/element.js";
 import { escapeHtml } from "../../utils/escapeHtml.js";
@@ -31,7 +32,7 @@ function folderIconName(storageName: string): ButtonIconName {
 }
 
 function emptyReadingPane(): string {
-  return `<button id="back-button" class="quiet-button back-button" type="button">${iconLabel("back", "Back to list")}</button><div class="reading-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 6h16v12H4z"/><path d="M4 7l8 6 8-6"/></svg><h2>Select a message</h2><p>Choose a conversation to read it here.</p></div>`;
+  return `<button id="back-button" class="quiet-button back-button" type="button">${iconLabel("back", "Back to list")}</button><div class="reading-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 6h16v12H4z"/><path d="M4 7l8 6 8-6"/></svg><h2>Select a message</h2><p>Choose a message to read it here.</p></div>`;
 }
 
 function folderButtons(folders: MailFolder[]): string {
@@ -57,9 +58,10 @@ function messageResults(messages: MessageSummary[], folders: MailFolder[], searc
 function bindFolderButtons(): void {
   document.querySelectorAll<HTMLButtonElement>("#mailbox-layout [data-folder]").forEach((button) => {
     button.addEventListener("click", () => {
-      applicationState.folderName = button.dataset.folder || MailFolderName.Inbox;
+      const folderName = button.dataset.folder || MailFolderName.Inbox;
+      applicationState.folderName = folderName;
       applicationState.messageIdentifier = "";
-      void renderMailbox();
+      navigateTo(`/mailbox/${encodeURIComponent(folderName)}`);
     });
   });
 }
@@ -133,7 +135,7 @@ let mailboxRefreshRequest = 0;
 
 export async function refreshOpenMailbox(): Promise<void> {
   const layout = document.querySelector("#mailbox-layout");
-  if (!layout || !location.hash.startsWith("#mailbox")) {
+  if (!layout || !currentPathName().startsWith("/mailbox")) {
     return;
   }
   const request = ++mailboxRefreshRequest;
@@ -177,9 +179,15 @@ mailboxActions.openComposer = openComposer;
 
 export const mailboxPage: Page = {
   matches(route) {
-    return route.startsWith("mailbox");
+    return route === "mailbox" || route.startsWith("mailbox/");
   },
-  async render() {
+  async render(route) {
+    if (route.startsWith("mailbox/")) {
+      const folderName = decodeURIComponent(route.slice("mailbox/".length).split("/")[0] || "");
+      if (folderName) {
+        applicationState.folderName = folderName;
+      }
+    }
     await renderMailbox();
   }
 };

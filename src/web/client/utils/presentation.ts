@@ -38,6 +38,7 @@ export function bindMessageFrame(frame: HTMLIFrameElement): void {
   }
 }
 
-export function fold(title: string, body: string, open = false): string {
-  return `<details class="fold"${open ? " open" : ""}><summary>${title}</summary><div class="fold-body">${body}</div></details>`;
+export function fold(title: string, body: string, open = false, foldId = ""): string {
+  const identity = foldId ? ` id="${foldId}"` : "";
+  return `<details class="fold"${identity}${open ? " open" : ""}><summary>${title}</summary><div class="fold-body">${body}</div></details>`;
 }

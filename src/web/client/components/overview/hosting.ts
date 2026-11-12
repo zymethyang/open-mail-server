@@ -1,11 +1,11 @@
 import { ServerPort } from "../../enums/serverPort.js";
-import type { HostingInformation, ListenerReport, PublicPortReport } from "../../interfaces/models.js";
+import type { HostingInformation, ListenerReport, MailClientSettings, PublicPortReport } from "../../interfaces/models.js";
 import { escapeHtml } from "../../utils/escapeHtml.js";
 import { fold } from "../../utils/presentation.js";
 
 export function listenerList(listeners: ListenerReport[] | undefined, publicPorts: PublicPortReport | undefined): string {
   if (!listeners?.length) {
-    return `<div class="empty"><h3>No listeners reported</h3><p>Start the server again and check the console for port permissions.</p></div>`;
+    return `<div class="empty"><h3>No listeners reported</h3><p>Restart the server and check port permissions.</p></div>`;
   }
   const checks = new Map((publicPorts?.checks || []).map((item) => [item.port, item]));
   const rows = listeners
@@ -24,19 +24,42 @@ export function listenerList(listeners: ListenerReport[] | undefined, publicPort
   const address = publicPorts?.address
     ? `Checked ${escapeHtml(publicPorts.address)} (${escapeHtml(publicPorts.source)}).`
     : escapeHtml(publicPorts?.source || "The public address could not be checked.");
-  return `<p class="hint">${address} Open means this server could connect to that address. Closed can mean a firewall, or that the network does not route the public address back to this machine.</p><div class="table-wrap"><table><caption class="visually-hidden">Protocol listeners</caption><thead><tr><th>Protocol</th><th>Port</th><th>Security</th><th>Purpose</th><th>Status</th><th>Public</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  return `<p class="hint">${address} Open means this server reached that address. Closed can mean a firewall or that the public address does not route back here.</p><div class="table-wrap"><table><caption class="visually-hidden">Protocol listeners</caption><thead><tr><th>Protocol</th><th>Port</th><th>Security</th><th>Purpose</th><th>Status</th><th>Public</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
-export function renderClientSettings(hosting: HostingInformation | undefined): string {
-  if (!hosting) {
-    return "";
-  }
-  const clients = hosting.clients;
-  return `<section class="fold"><h2>Mail client settings</h2><div class="fold-body"><dl class="record-list">
-        <div><dt>Incoming server</dt><dd>${escapeHtml(clients.incomingHost)} port ${clients.incomingPort}, ${escapeHtml(clients.incomingSecurity)}</dd></div>
-        <div><dt>Outgoing server</dt><dd>${escapeHtml(clients.outgoingHost)} port ${clients.outgoingPort}, ${escapeHtml(clients.outgoingSecurity)}</dd></div>
-        <div><dt>Username</dt><dd>The full email address</dd></div>
-      </dl></div></section>`;
+export function renderMailClientSettingsCard(clients: MailClientSettings): string {
+  return `<section class="card" id="mail-client-settings">
+    <h2>Mail client settings</h2>
+    <dl class="record-list">
+      <div><dt>Incoming server</dt><dd>${escapeHtml(clients.incomingHost)} port ${clients.incomingPort}, ${escapeHtml(clients.incomingSecurity)}</dd></div>
+      <div><dt>Outgoing server</dt><dd>${escapeHtml(clients.outgoingHost)} port ${clients.outgoingPort}, ${escapeHtml(clients.outgoingSecurity)}</dd></div>
+      <div><dt>Username</dt><dd>Full email address</dd></div>
+    </dl>
+    ${fold(
+      "Android",
+      `<ol>
+      <li>Add an IMAP account in the mail app.</li>
+      <li>Use the host, port, and security values above.</li>
+      <li>Username is the full email; password is the mailbox password.</li>
+    </ol>`
+    )}
+    ${fold(
+      "iOS",
+      `<ol>
+      <li>Add an IMAP account.</li>
+      <li>Match the host, port, and TLS/SSL (or STARTTLS) values above.</li>
+      <li>Sign in with the full email and mailbox password.</li>
+    </ol>`
+    )}
+    ${fold(
+      "Desktop",
+      `<ol>
+      <li>In Outlook, Thunderbird, or Apple Mail, choose IMAP.</li>
+      <li>Enter the same host, port, and security values above.</li>
+      <li>Username is the full email; password is the mailbox password.</li>
+    </ol>`
+    )}
+  </section>`;
 }
 
 export function bindDnsRecordCopies(): void {
@@ -132,14 +155,14 @@ export function renderDnsRecords(hosting: HostingInformation | undefined): strin
   }
   const webNote = hosting.secureWeb
     ? `The web console uses TLS on port ${ServerPort.Web}.`
-    : "The web console is plain HTTP until a certificate is enabled for it.";
+    : "The web console is HTTP until a certificate is enabled.";
   return fold(
     "DNS records",
     `<div id="dns-records">
-      <p class="hint">At the company DNS host, point ${escapeHtml(hosting.domain)} at this server before other companies can deliver mail.</p>
+      <p class="hint">At your DNS host, point ${escapeHtml(hosting.domain)} at this server so others can deliver mail.</p>
       <div class="form-actions"><button id="copy-zone-file" class="quiet-button" type="button">Copy DNS records</button></div>
       <pre id="dns-zone-file" class="dns-zone">${escapeHtml(hosting.zoneFile || "")}</pre>
-      <p class="hint">${escapeHtml(webNote)} Open the protocol ports shown below on the firewall. The certificate should include ${escapeHtml(hosting.publicHostname)}.</p>
+      <p class="hint">${escapeHtml(webNote)} Open the ports below on the firewall. The certificate should include ${escapeHtml(hosting.publicHostname)}.</p>
     </div>`,
     true
   );

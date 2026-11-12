@@ -3,6 +3,7 @@ import { requestJson } from "../../http/jsonClient.js";
 import { element } from "../../utils/element.js";
 import { errorMessage } from "../../utils/errorMessage.js";
 import { clearFormErrors, showFormError } from "../../utils/formFeedback.js";
+import { navigateTo } from "../../session/pathNavigation.js";
 import { loadBootstrap } from "../../session/loadBootstrap.js";
 
 function setupErrorField(message: string): string {
@@ -60,7 +61,7 @@ export function bindSetup(): void {
           password: element<HTMLInputElement>("#setup-password").value
         })
       });
-      location.hash = "#overview";
+      navigateTo("/admin/overview", true);
       await loadBootstrap();
     } catch (error) {
       const message = errorMessage(error);

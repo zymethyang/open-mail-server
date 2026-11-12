@@ -26,10 +26,6 @@ export async function openSecureStorage(storageDirectory: string): Promise<void>
   await chmod(storageDirectory, 0o700).catch(() => undefined);
 }
 
-export function storageIsReady(): boolean {
-  return storageKey !== null;
-}
-
 export async function sealValue(value: unknown, purpose = ""): Promise<SealedEnvelope> {
   const loaded = await requireStorageKey();
   const nonce = randomBytes(storageNonceBytes);

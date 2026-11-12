@@ -89,8 +89,8 @@ describe("public address", () => {
       assert.equal(problem.includes("network card"), false);
 
       await submitSetup(browser, "149.28.152.245");
-      await browser.waitUntil("The administrator should land on the overview", (page) => !page.applicationHidden && page.hash === "#overview");
-      await browser.followHash("#settings");
+      await browser.waitUntil("The administrator should land on the overview", (page) => !page.applicationHidden && page.pathName === "/admin/overview");
+      await browser.followPath("/admin/settings");
       const records = await waitFor(
         browser,
         "DNS records should use the entered public IP address and administrator email",

@@ -46,8 +46,8 @@ describe("mailbox message actions", () => {
 
       await browser.openAddress(`${consoleServer.baseUrl}/`);
       await browser.signIn("ada@acme.test", "correct-horse");
-      await browser.followHash("#mailbox");
-      await browser.waitUntil("The mailbox should open", (page) => page.mailboxOpen && page.hash === "#mailbox");
+      await browser.followPath("/mailbox");
+      await browser.waitUntil("The mailbox should open", (page) => page.mailboxOpen && page.pathName.startsWith("/mailbox"));
       await waitFor(browser, "The new message should be listed", `document.querySelector("[data-message]") ? "listed" : "waiting"`);
       await browser.press("[data-message]");
       const actions = await waitFor(

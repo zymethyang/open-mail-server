@@ -114,8 +114,8 @@ describe("composer send errors in the browser", () => {
 
       await browser.openAddress(`${consoleServer.baseUrl}/`);
       await browser.signIn("ada@acme.com", "correct-horse");
-      await browser.followHash("#mailbox");
-      await browser.waitUntil("The mailbox should open", (page) => page.mailboxOpen && page.hash === "#mailbox");
+      await browser.followPath("/mailbox");
+      await browser.waitUntil("The mailbox should open", (page) => page.mailboxOpen && page.pathName.startsWith("/mailbox"));
 
       await openComposer(browser);
       const aligned = await composerState(browser);

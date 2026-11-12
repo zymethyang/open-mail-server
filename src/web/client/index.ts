@@ -17,7 +17,7 @@ async function signOut(): Promise<void> {
     applicationState.bootstrap.account = null;
   }
   applicationState.clearSessionView();
-  location.hash = "";
+  history.replaceState(null, "", "/");
   await requestJson(ApiEndpoint.Session, { method: "DELETE" });
   await loadBootstrap();
 }

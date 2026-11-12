@@ -4,27 +4,32 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Open Mail Server</title>
-    <link rel="icon" href="favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="styles/base.css">
-    <link rel="stylesheet" href="styles/gate.css">
-    <link rel="stylesheet" href="styles/shell.css">
-    <link rel="stylesheet" href="styles/overview.css">
-    <link rel="stylesheet" href="styles/logs.css">
-    <link rel="stylesheet" href="styles/failedEmail.css">
-    <link rel="stylesheet" href="styles/users.css">
-    <link rel="stylesheet" href="styles/mailbox.css">
-    <link rel="stylesheet" href="styles/settings.css">
-    <link rel="stylesheet" href="styles/security.css">
-    <link rel="stylesheet" href="styles/responsive.css">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@600;700&family=Work+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/styles/base.css">
+    <link rel="stylesheet" href="/styles/gate.css">
+    <link rel="stylesheet" href="/styles/shell.css">
+    <link rel="stylesheet" href="/styles/overview.css">
+    <link rel="stylesheet" href="/styles/logs.css">
+    <link rel="stylesheet" href="/styles/failedEmail.css">
+    <link rel="stylesheet" href="/styles/users.css">
+    <link rel="stylesheet" href="/styles/mailbox.css">
+    <link rel="stylesheet" href="/styles/settings.css">
+    <link rel="stylesheet" href="/styles/security.css">
+    <link rel="stylesheet" href="/styles/responsive.css">
   </head>
   <body>
     <a class="skip-link" href="#main-content">Skip to content</a>
 
     <section id="setup-screen" class="gate" hidden>
+      <div class="gate-atmosphere" aria-hidden="true"></div>
       <div class="gate-copy">
-        <p class="eyebrow">Open Mail Server</p>
+        <img class="gate-brand-mark" src="/icons/brand.svg" alt="">
+        <p class="gate-product-name">Open Mail Server</p>
         <h1>Host mail on your company domain</h1>
-        <p>This installation serves one organization. Messages stay on this server, and employees can use the web mailbox or a mail client.</p>
+        <p>One organization on this server. People use the web mailbox or a mail client.</p>
       </div>
       <form id="setup-form" class="panel">
         <h2>Create the administrator</h2>
@@ -42,16 +47,18 @@
         <input id="setup-address" name="email" autocomplete="username" required placeholder="you@acme.com">
         <label for="setup-password">Password</label>
         <input id="setup-password" name="password" type="password" autocomplete="new-password" required minlength="8">
-        <p class="hint" id="setup-password-hint">Use at least 8 characters. This signs you in to the web console, SMTP, IMAP, and POP3.</p>
+        <p class="hint" id="setup-password-hint">At least 8 characters. Used for the web console, SMTP, IMAP, and POP3.</p>
         <div class="form-actions"><button class="primary-button" type="submit">Create administrator</button></div>
       </form>
     </section>
 
     <section id="sign-in-screen" class="gate" hidden>
+      <div class="gate-atmosphere" aria-hidden="true"></div>
       <div class="gate-copy">
-        <p class="eyebrow">Open Mail Server</p>
+        <img class="gate-brand-mark" src="/icons/brand.svg" alt="">
+        <p class="gate-product-name">Open Mail Server</p>
         <h1 id="sign-in-title">Sign in</h1>
-        <p id="sign-in-detail">Use the mailbox created for this company domain.</p>
+        <p id="sign-in-detail">Use the mailbox for this company domain.</p>
       </div>
       <form id="sign-in-form" class="panel">
         <h2>Welcome back</h2>
@@ -65,7 +72,7 @@
         <div id="sign-in-code-step" hidden>
           <label for="sign-in-code">Authenticator code</label>
           <input id="sign-in-code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]*">
-          <p class="hint">Open the authenticator app and enter the 6 digit code.</p>
+          <p class="hint">Enter the 6-digit code from your authenticator app.</p>
         </div>
         <div class="form-actions">
           <button class="primary-button" type="submit">Sign in</button>
@@ -77,7 +84,7 @@
     <div id="application-shell" class="shell" hidden>
       <aside class="sidebar">
         <div class="brand">
-          <img class="brand-mark" src="icons/brand.svg" alt="">
+          <img class="brand-mark" src="/icons/brand.svg" alt="">
           <div>
             <p class="eyebrow">Open Mail Server</p>
             <strong id="organization-label">Company</strong>
@@ -93,6 +100,6 @@
       <main id="main-content" class="main" tabindex="-1"></main>
     </div>
 
-    <script type="module" src="client/index.js"></script>
+    <script type="module" src="/client/index.js"></script>
   </body>
 </html>

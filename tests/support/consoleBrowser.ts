@@ -6,13 +6,16 @@ import os from "node:os";
 import path from "node:path";
 
 export interface ConsolePageState {
+  pathName: string;
   hash: string;
   navigationLabels: string[];
+  modeSwitchLabel: string;
   securityLabel: string;
   signOutLabel: string;
   applicationHidden: boolean;
   signInHidden: boolean;
   heading: string;
+  mainText: string;
   mailboxOpen: boolean;
   accountAddress: string;
   signInTitle: string;
@@ -33,13 +36,16 @@ interface PendingCommand {
 }
 
 const pageStateExpression = `JSON.stringify({
+  pathName: location.pathname,
   hash: location.hash,
   navigationLabels: [...document.querySelectorAll("#primary-navigation a")].map((link) => link.textContent.trim()),
+  modeSwitchLabel: document.querySelector("#mode-switch-button")?.textContent.trim() || "",
   securityLabel: document.querySelector("#password-button")?.textContent.trim() || "",
   signOutLabel: document.querySelector("#sign-out-button")?.textContent.trim() || "",
   applicationHidden: document.querySelector("#application-shell") ? Boolean(document.querySelector("#application-shell").hidden) : true,
   signInHidden: document.querySelector("#sign-in-screen") ? Boolean(document.querySelector("#sign-in-screen").hidden) : true,
   heading: document.querySelector("#main-content h1")?.textContent.trim() || "",
+  mainText: document.querySelector("#main-content")?.textContent.trim() || "",
   mailboxOpen: Boolean(document.querySelector("#mailbox-layout")),
   accountAddress: document.querySelector("#account-label")?.textContent.trim() || "",
   signInTitle: document.querySelector("#sign-in-title")?.textContent.trim() || "",
@@ -186,6 +192,13 @@ export class ConsoleBrowser {
 
   async followHash(hash: string): Promise<void> {
     await this.evaluate(`location.hash = ${JSON.stringify(hash)}`);
+  }
+
+  async followPath(pathName: string): Promise<void> {
+    await this.evaluate(`(() => {
+      history.pushState(null, "", ${JSON.stringify(pathName)});
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    })()`);
   }
 
   async press(selector: string): Promise<void> {

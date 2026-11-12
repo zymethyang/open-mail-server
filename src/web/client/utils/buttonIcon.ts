@@ -5,6 +5,8 @@ export type ButtonIconName =
   | MailFolderName
   | "security"
   | "signOut"
+  | "openMailbox"
+  | "openAdminPortal"
   | "newMessage"
   | "reply"
   | "forward"
@@ -21,6 +23,8 @@ export type ButtonIconName =
 const iconPaths: Record<ButtonIconName, string> = {
   security: `<path d="M12 3l8 3v6c0 4.5-3.2 7.4-8 9-4.8-1.6-8-4.5-8-9V6z"/>`,
   signOut: `<path d="M10 6V4h10v16H10v-2"/><path d="M4 12h11"/><path d="M11 8l4 4-4 4"/>`,
+  openMailbox: `<path d="M4 6h16v12H4z"/><path d="M4 7l8 6 8-6"/>`,
+  openAdminPortal: `<path d="M4 11l8-7 8 7"/><path d="M6 10v10h4v-6h4v6h4V10"/>`,
   [MailFolderName.Inbox]: `<path d="M4 5h16v14H4z"/><path d="M4 13h4l2 3h4l2-3h4"/>`,
   [MailFolderName.Sent]: `<path d="M4 12l16-7-6 16-2.5-6.5z"/>`,
   [MailFolderName.Drafts]: `<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/><path d="M9 12h6"/><path d="M9 16h4"/>`,

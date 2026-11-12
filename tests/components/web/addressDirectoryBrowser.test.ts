@@ -53,7 +53,7 @@ describe("address directory in the browser", () => {
         password: "correct-horse"
       });
       assert.equal(setup.status, 201);
-      const member = await requestJson(consoleServer.baseUrl, "POST", "/api/mailboxes", {
+      const member = await requestJson(consoleServer.baseUrl, "POST", "/api/admin/mailboxes", {
         address: "bea@acme.test",
         displayName: "Bea Member",
         password: "member-horse"
@@ -62,27 +62,49 @@ describe("address directory in the browser", () => {
 
       await browser.openAddress(consoleServer.baseUrl);
       await browser.signIn("ada@acme.test", "correct-horse");
-      await browser.followHash("#addresses");
-      await browser.waitUntil("Addresses should open for an administrator", (state) => state.hash === "#addresses" && state.heading === "Addresses");
-      await waitForText(browser, "No aliases yet.");
+      await browser.followPath("/admin/addresses");
+      await browser.waitUntil("Addresses should open for an administrator", (state) => state.pathName === "/admin/addresses" && state.heading === "Addresses");
+      await waitForText(browser, "Aliases (0)");
+      const emptyAliases = await browser.script(`(() => {
+        const fold = [...document.querySelectorAll("#address-routes details.fold")].find((item) => item.querySelector("summary")?.textContent.trim() === "Aliases (0)");
+        if (!(fold instanceof HTMLDetailsElement)) {
+          return "missing";
+        }
+        fold.open = true;
+        return fold.querySelector(".fold-body")?.textContent.trim() || "";
+      })()`);
+      assert.equal(emptyAliases, "No aliases yet.");
 
       await submitAddress(browser, "alias", "sales@acme.test", "missing@acme.test");
       await waitForText(browser, "Mailbox missing@acme.test does not exist");
 
       await submitAddress(browser, "alias", "sales@acme.test", "bea@acme.test");
+      await waitForText(browser, "Aliases (1)");
       await waitForText(browser, "sales@acme.test goes to bea@acme.test");
 
       await browser.press('[data-remove="alias"]');
-      await waitForText(browser, "No aliases yet.");
+      await waitForText(browser, "Aliases (0)");
+      const clearedAliases = await browser.script(`(() => {
+        const fold = [...document.querySelectorAll("#address-routes details.fold")].find((item) => item.querySelector("summary")?.textContent.trim() === "Aliases (0)");
+        if (!(fold instanceof HTMLDetailsElement)) {
+          return "missing";
+        }
+        fold.open = true;
+        return fold.querySelector(".fold-body")?.textContent.trim() || "";
+      })()`);
+      assert.equal(clearedAliases, "No aliases yet.");
 
-      await browser.followHash("#mailbox");
-      await browser.waitUntil("The mailbox should open", (state) => state.hash.startsWith("#mailbox") && state.mailboxOpen);
+      await browser.followPath("/mailbox");
+      await browser.waitUntil("The mailbox should open", (state) => state.pathName.startsWith("/mailbox") && state.mailboxOpen);
       const signedOut = await browser.script(`document.querySelector("#sign-out-button")?.click(); "signed-out"`);
       assert.equal(signedOut, "signed-out");
       await browser.waitUntil("Sign out should return to the gate", (state) => state.applicationHidden && !state.signInHidden);
       await browser.signIn("bea@acme.test", "member-horse");
-      await browser.followHash("#addresses");
-      const memberPage = await browser.waitUntil("A member should leave the address directory", (state) => state.hash.startsWith("#mailbox"));
+      await browser.followPath("/admin/addresses");
+      const memberPage = await browser.waitUntil(
+        "A member should see unauthorized Admin portal access",
+        (state) => state.pathName === "/admin/addresses" && state.heading === "Administrator access required"
+      );
       assert.equal(memberPage.navigationLabels.includes("Addresses"), false);
     } finally {
       await browser.close();

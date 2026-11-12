@@ -1,5 +1,6 @@
 @media (max-width: 1024px) {
   .metric-grid, .gate, .mailbox { grid-template-columns: 1fr; }
+  .gate { align-items: stretch; }
   .main:has(.mailbox) { overflow: auto; padding: 12px; background: var(--color-mail-canvas); }
   .mailbox { flex: none; height: auto; min-height: 0; overflow: visible; }
   .mail-surface { grid-template-columns: 1fr; height: auto; }
@@ -21,7 +22,8 @@
   .filters { grid-template-columns: 1fr; }
 }
 @media (max-width: 720px) {
-  .gate, .main, .sidebar { padding: var(--space-3); }
+  .gate { padding: clamp(24px, 6vw, 40px) var(--space-3); }
+  .main, .sidebar { padding: var(--space-3); }
   h1 { font-size: 26px; }
   .page-header { align-items: center; flex-wrap: wrap; }
   .sidebar-footer { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: 0; }

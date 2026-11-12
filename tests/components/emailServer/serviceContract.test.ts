@@ -28,7 +28,8 @@ describe("release contracts", () => {
       WorkerMessageKind.Listeners,
       WorkerMessageKind.Ready,
       WorkerMessageKind.Failed,
-      WorkerMessageKind.Stop
+      WorkerMessageKind.Stop,
+      WorkerMessageKind.ShutdownRequested
     ]);
     assert.equal(new Set(kinds).size, kinds.length);
   });

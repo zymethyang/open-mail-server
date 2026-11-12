@@ -43,12 +43,12 @@ function renderTable(): void {
   const target = element("#failed-table");
   const visible = visibleMessages();
   if (!failedMessages.length) {
-    target.innerHTML = `<div class="empty"><h2>No failed email</h2><p>Mail that cannot leave this server waits here until it is sent or returned to the sender.</p></div>`;
+    target.innerHTML = `<div class="empty"><h2>No failed email</h2><p>Outbound mail that cannot leave waits here until sent or returned.</p></div>`;
     updateResendButton();
     return;
   }
   if (!visible.length) {
-    target.innerHTML = `<div class="empty"><h2>No matching failed email</h2><p>Try a different sender, recipient, or subject. Resend all still sends every failed message.</p></div>`;
+    target.innerHTML = `<div class="empty"><h2>No matching failed email</h2><p>Try a different sender, recipient, or subject.</p></div>`;
     updateResendButton();
     return;
   }

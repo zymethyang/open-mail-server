@@ -1,9 +1,10 @@
 import { ApiEndpoint } from "../enums/apiEndpoint.js";
 import { watchSignedInMailbox } from "../components/mailbox/liveMailbox.js";
 import { requestJson } from "../http/jsonClient.js";
-import { homeHash } from "./consoleAccess.js";
+import { homePath } from "./consoleAccess.js";
 import type { Bootstrap } from "../interfaces/models.js";
 import { renderRoute } from "../router.js";
+import { currentPathName, navigateTo, syncLegacyHashRoute } from "./pathNavigation.js";
 import { showScreen } from "../components/screen/index.js";
 import { resetSignInStep } from "../components/signIn/index.js";
 import { applicationState } from "../state/applicationState.js";
@@ -34,8 +35,10 @@ export async function loadBootstrap(): Promise<void> {
     return;
   }
   showScreen("application");
-  if (!location.hash) {
-    location.hash = homeHash(applicationState.bootstrap.account.role);
+  syncLegacyHashRoute();
+  const pathName = currentPathName();
+  if (pathName === "/" || pathName === "") {
+    navigateTo(homePath(applicationState.bootstrap.account.role), true);
     return;
   }
   await renderRoute();

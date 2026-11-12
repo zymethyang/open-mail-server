@@ -28,7 +28,15 @@ import { openDomainKey } from "../domainKey/index.js";
 import { consoleAllowsVisitor } from "./utils/consoleVisitor.js";
 import { createDnsGuide, formatDnsGuideForTerminal } from "./utils/dnsGuide.js";
 import { AddressRouteRepository } from "../addressRoute/index.js";
-import { createStorageBackup } from "../backup/index.js";
+import {
+  createStorageBackup,
+  deleteStorageBackup,
+  endRestore,
+  isRestoreInProgress,
+  listStorageBackups,
+  restoreStorageBackup,
+  tryBeginRestore
+} from "../backup/index.js";
 import { displayedImageType } from "./utils/displayedImageType.js";
 import { createMessageIdentifier, createRawMessage, parseRawMessage, sanitizeMessageHtml, type OutboundAttachment } from "../mime/index.js";
 import { createSnippet } from "../mime/index.js";
@@ -55,11 +63,27 @@ function frontendDirectories(): string[] {
   return [path.join(projectDirectory, "dist", "web"), path.join(projectDirectory, "src", "web")];
 }
 
+function isConsoleApplicationPath(requestPath: string): boolean {
+  return (
+    requestPath === "/account" ||
+    requestPath === "/overview" ||
+    requestPath.startsWith("/overview/") ||
+    requestPath === "/mailbox" ||
+    requestPath.startsWith("/mailbox/") ||
+    requestPath.startsWith("/admin/")
+  );
+}
+
+export function isResolvedPathInsideRoot(candidate: string, resolvedRoot: string): boolean {
+  return candidate === resolvedRoot || candidate.startsWith(`${resolvedRoot}${path.sep}`);
+}
+
 async function resolvePublicFile(requestPath: string): Promise<string | null> {
-  const relativePath = requestPath === "/" ? "index.html" : requestPath.replace(/^\/+/, "");
+  const relativePath = requestPath === "/" || isConsoleApplicationPath(requestPath) ? "index.html" : requestPath.replace(/^\/+/, "");
   for (const root of frontendDirectories()) {
-    const candidate = path.resolve(root, relativePath);
-    if (!candidate.startsWith(path.resolve(root))) {
+    const resolvedRoot = path.resolve(root);
+    const candidate = path.resolve(resolvedRoot, relativePath);
+    if (!isResolvedPathInsideRoot(candidate, resolvedRoot)) {
       return null;
     }
     if (!frontendExtensions.has(path.extname(candidate))) {
@@ -205,6 +229,22 @@ function sendJson(response: http.ServerResponse, statusCode: number, payload: un
   response.end(body);
 }
 
+function scheduleProcessRestart(response: http.ServerResponse, requestProcessRestart?: () => void): void {
+  if (!requestProcessRestart) {
+    return;
+  }
+  const restart = () => {
+    setImmediate(() => {
+      requestProcessRestart();
+    });
+  };
+  if (response.writableFinished) {
+    restart();
+    return;
+  }
+  response.once("finish", restart);
+}
+
 function textValue(value: unknown): string {
   return String(value ?? "");
 }
@@ -315,6 +355,18 @@ function companyApiPath(pathName: string): boolean {
   return companyApiPrefixes.some((prefix) => pathName === prefix || pathName.startsWith(`${prefix}/`));
 }
 
+function personalApiPath(pathName: string): boolean {
+  return (
+    pathName === ApiEndpoint.MailboxEvents ||
+    pathName === ApiEndpoint.MailClientSettings ||
+    pathName === ApiEndpoint.Folders ||
+    pathName === ApiEndpoint.Messages ||
+    pathName === ApiEndpoint.Drafts ||
+    pathName.startsWith(`${ApiEndpoint.Folders}/`) ||
+    pathName.startsWith("/api/account/")
+  );
+}
+
 export function createWebServer(dependencies: {
   configuration: Configuration;
   accountRepository: AccountRepository;
@@ -331,12 +383,25 @@ export function createWebServer(dependencies: {
   settingsRepository: SettingsRepository;
   readCertificate(): Promise<CertificateDescription>;
   replaceCertificate(certificatePem: string, privateKeyPem: string, intermediateCertificatesPem?: string): Promise<CertificateDescription>;
+  requestProcessRestart?: () => void;
 }): http.Server | https.Server {
   const addressRouteRepository = new AddressRouteRepository(dependencies.configuration.storageDirectory);
-  async function hostingGuide(company: OrganizationRecord) {
+  async function mailClientSettings(company: OrganizationRecord) {
     const hostname = (await dependencies.serverName()) || company.domain;
     const incoming = dependencies.listenerStatus.find((item) => item.name === "IMAP" && item.security === "TLS");
     const outgoing = dependencies.listenerStatus.find((item) => item.name === "SMTP" && item.security === "STARTTLS");
+    return {
+      incomingHost: hostname,
+      incomingPort: incoming?.port || dependencies.configuration.imapSecurePort,
+      incomingSecurity: "TLS",
+      outgoingHost: hostname,
+      outgoingPort: outgoing?.port || dependencies.configuration.smtpSubmissionPort,
+      outgoingSecurity: "STARTTLS"
+    };
+  }
+
+  async function hostingGuide(company: OrganizationRecord) {
+    const hostname = (await dependencies.serverName()) || company.domain;
     const domainKey = await openDomainKey(dependencies.configuration.storageDirectory);
     const dnsGuide = createDnsGuide(company.domain, hostname, company.publicAddress, domainKey.recordValue, company.administratorAddress);
     return {
@@ -345,14 +410,7 @@ export function createWebServer(dependencies: {
       secureWeb: dependencies.configuration.secureWeb,
       dns: dnsGuide.records,
       zoneFile: dnsGuide.zoneFile,
-      clients: {
-        incomingHost: hostname,
-        incomingPort: incoming?.port || dependencies.configuration.imapSecurePort,
-        incomingSecurity: "TLS",
-        outgoingHost: hostname,
-        outgoingPort: outgoing?.port || dependencies.configuration.smtpSubmissionPort,
-        outgoingSecurity: "STARTTLS"
-      }
+      clients: await mailClientSettings(company)
     };
   }
 
@@ -362,14 +420,20 @@ export function createWebServer(dependencies: {
     const organization = await dependencies.organizationRepository.read();
 
     if (request.method === "GET" && pathName === ApiEndpoint.Bootstrap) {
+      const isAdministrator = context.account?.role === AccountRole.Administrator;
+      const publicOrganization = organization
+        ? isAdministrator
+          ? organization
+          : { domain: organization.domain, displayName: organization.displayName }
+        : null;
       sendJson(response, 200, {
         productName: "Open Mail Server",
         needsSetup: !organization,
         configuredDomain: dependencies.configuration.configuredDomain,
-        organization,
+        organization: publicOrganization,
         account: context.account,
-        listeners: context.account?.role === AccountRole.Administrator ? dependencies.listenerStatus : [],
-        hosting: organization && context.account?.role === AccountRole.Administrator ? await hostingGuide(organization) : null
+        listeners: isAdministrator ? dependencies.listenerStatus : [],
+        hosting: organization && isAdministrator ? await hostingGuide(organization) : null
       });
       return true;
     }
@@ -751,11 +815,67 @@ export function createWebServer(dependencies: {
       throw new HttpError(404, "Not found");
     }
 
+    if (request.method === "GET" && pathName === ApiEndpoint.Backup) {
+      requireAdministrator(context);
+      sendJson(response, 200, { backups: await listStorageBackups(dependencies.configuration.storageDirectory) });
+      return true;
+    }
+
     if (request.method === "POST" && pathName === ApiEndpoint.Backup) {
       requireAdministrator(context);
+      if (isRestoreInProgress()) {
+        throw new HttpError(409, "A restore is already in progress");
+      }
       const backupDirectory = await createStorageBackup(dependencies.configuration.storageDirectory);
       sendJson(response, 201, { backupName: path.basename(backupDirectory) });
       return true;
+    }
+
+    if (request.method === "DELETE" && pathName === ApiEndpoint.Backup) {
+      requireAdministrator(context);
+      if (isRestoreInProgress()) {
+        throw new HttpError(409, "A restore is already in progress");
+      }
+      const backupName = textValue(context.body.backupName).trim();
+      try {
+        await deleteStorageBackup(dependencies.configuration.storageDirectory, backupName);
+      } catch (error) {
+        if ((error as Error).message === "Choose a backup from the list") {
+          throw new HttpError(400, "Choose a backup from the list");
+        }
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          throw new HttpError(404, "That backup was not found");
+        }
+        throw error;
+      }
+      sendJson(response, 200, { deleted: true, backupName });
+      return true;
+    }
+
+    if (request.method === "POST" && pathName === ApiEndpoint.BackupRestore) {
+      requireAdministrator(context);
+      if (!tryBeginRestore()) {
+        throw new HttpError(409, "A restore is already in progress");
+      }
+      const backupName = textValue(context.body.backupName).trim();
+      try {
+        try {
+          await restoreStorageBackup(dependencies.configuration.storageDirectory, backupName);
+        } catch (error) {
+          if ((error as Error).message === "Choose a backup from the list") {
+            throw new HttpError(400, "Choose a backup from the list");
+          }
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            throw new HttpError(404, "That backup was not found");
+          }
+          throw error;
+        }
+        sendJson(response, 200, { restored: true, backupName, restarting: true });
+        scheduleProcessRestart(response, dependencies.requestProcessRestart);
+        return true;
+      } finally {
+        endRestore();
+      }
     }
 
     if (request.method === "GET" && pathName === ApiEndpoint.Certificate) {
@@ -787,7 +907,19 @@ export function createWebServer(dependencies: {
       return true;
     }
 
+    if (!personalApiPath(pathName)) {
+      throw new HttpError(404, "Not found");
+    }
+
     const account = requireAccount(context);
+
+    if (request.method === "GET" && pathName === ApiEndpoint.MailClientSettings) {
+      if (!organization) {
+        throw new HttpError(404, "This server is not set up");
+      }
+      sendJson(response, 200, { clients: await mailClientSettings(organization) });
+      return true;
+    }
 
     if (request.method === "GET" && pathName === ApiEndpoint.MailboxEvents) {
       const stopListening = dependencies.mailboxEvents.subscribe((change) => {
@@ -1066,13 +1198,13 @@ export function createWebServer(dependencies: {
     }
     response.setHeader(
       "Content-Security-Policy",
-      "default-src 'self'; connect-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'self'; frame-ancestors 'none'"
+      "default-src 'self'; connect-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'self'; frame-ancestors 'none'"
     );
     try {
       const requestUrl = new URL(request.url || "/", `http://${request.headers.host || "127.0.0.1"}`);
       if (request.method === "GET" && requestUrl.pathname === "/health") {
         const failed = dependencies.listenerStatus.filter((listener) => !listener.started);
-        sendJson(response, failed.length ? 503 : 200, { ok: failed.length === 0, listeners: dependencies.listenerStatus });
+        sendJson(response, failed.length ? 503 : 200, { ok: failed.length === 0 });
         return;
       }
       const companyAccountExists = await dependencies.accountRepository.hasAccounts();
@@ -1104,8 +1236,11 @@ export function createWebServer(dependencies: {
       const session = await dependencies.sessionRepository.read(cookies.session || "");
       const found = session ? await dependencies.accountRepository.findAccount(session.address) : null;
       const account = found && !found.disabled ? found : null;
+      const pathName = url.pathname;
       const body =
-        request.method === "GET" || request.method === "HEAD" || request.method === "DELETE"
+        request.method === "GET" ||
+        request.method === "HEAD" ||
+        (request.method === "DELETE" && pathName !== ApiEndpoint.Backup)
           ? {}
           : await readJsonBody(request);
       const handled = await route({ request, response, url, account, body });

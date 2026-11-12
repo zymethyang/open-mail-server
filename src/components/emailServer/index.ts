@@ -58,8 +58,41 @@ export async function startEmailServer(options?: {
     }
   }
 
+  async function stopWorkers(): Promise<void> {
+    stopping = true;
+    clearTimeout(startupTimer);
+    await Promise.all(
+      [...workers.values()].map(
+        (worker) =>
+          new Promise<void>((resolve) => {
+            if (!runningWorkers.has(worker)) {
+              resolve();
+              return;
+            }
+            const timer = setTimeout(() => {
+              void worker.terminate().finally(() => resolve());
+            }, 5_000);
+            worker.once("exit", () => {
+              clearTimeout(timer);
+              resolve();
+            });
+            worker.postMessage({ kind: WorkerMessageKind.Stop });
+          })
+      )
+    );
+  }
+
   function handleMessage(service: ServiceName, worker: Worker, message: WorkerMessage): void {
     if (workers.get(service) !== worker) {
+      return;
+    }
+    if (message.kind === WorkerMessageKind.ShutdownRequested) {
+      if (stopping) {
+        return;
+      }
+      void stopWorkers().then(() => {
+        process.exit(0);
+      });
       return;
     }
     if (message.kind === WorkerMessageKind.ResolveMailExchange && message.requestId && message.domain) {
@@ -144,29 +177,7 @@ export async function startEmailServer(options?: {
   return {
     configuration,
     listeners,
-    async stop() {
-      stopping = true;
-      clearTimeout(startupTimer);
-      await Promise.all(
-        [...workers.values()].map(
-          (worker) =>
-            new Promise<void>((resolve) => {
-              if (!runningWorkers.has(worker)) {
-                resolve();
-                return;
-              }
-              const timer = setTimeout(() => {
-                void worker.terminate().finally(() => resolve());
-              }, 5_000);
-              worker.once("exit", () => {
-                clearTimeout(timer);
-                resolve();
-              });
-              worker.postMessage({ kind: WorkerMessageKind.Stop });
-            })
-        )
-      );
-    }
+    stop: stopWorkers
   };
 }
 

@@ -1,11 +1,27 @@
 .stack-card { margin-top: var(--space-5); }
-#settings-form .hint { padding-bottom: 0; }
-#settings-form .hint + .fold { margin-top: var(--space-4); }
-#settings-form .fold-body { padding-bottom: var(--space-4); }
-#settings-form .fold + .form-actions { margin-top: var(--space-4); }
+#certificate-card { margin-top: 0; }
+#certificate-card .fold { margin-top: var(--space-4); }
+#certificate-card .fold + .hint { margin-top: var(--space-4); }
 #certificate-card .record-list { margin-bottom: 0; }
 #certificate-card .choice { margin-bottom: 0; }
-#certificate-card + .modal + .fold { margin-top: var(--space-5); }
+#certificate-dialog + .fold { margin-top: var(--space-5); }
+#settings-form { margin-top: var(--space-5); }
+#settings-form .hint + .fold { margin-top: var(--space-4); }
+#settings-form .fold + .fold { margin-top: var(--space-4); }
+#settings-form .fold-body { padding-bottom: var(--space-4); }
+#settings-form .fold + .form-actions { margin-top: var(--space-4); }
+#address-routes .fold:first-child { margin-top: var(--space-5); }
+#address-routes .fold + .fold { margin-top: var(--space-4); }
+#address-routes .fold-body ul { margin: 0; padding-left: 1.25rem; }
+#address-routes .fold-body li { margin: 0 0 var(--space-2); line-height: 1.45; }
+#address-routes .fold-body li:last-child { margin-bottom: 0; }
+#backup-card .fold { margin-top: var(--space-4); }
+#backup-card .fold-body > .form-actions:first-child { margin-top: 0; }
+#backup-card .backup-list { margin: var(--space-4) 0 0; padding: 0; border: 0; }
+#backup-card .backup-list legend { font-weight: 600; margin-bottom: var(--space-2); }
+#backup-card .backup-list .choice { margin-top: var(--space-2); }
+#backup-card #backup-empty { margin-top: var(--space-4); }
+#backup-delete-dialog + .fold { margin-top: var(--space-5); }
 .modal {
   width: min(440px, calc(100vw - 32px));
   margin: auto;

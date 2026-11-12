@@ -7,6 +7,7 @@ import { errorMessage } from "../../utils/errorMessage.js";
 import { iconLabel } from "../../utils/buttonIcon.js";
 import { clearFormErrors, replaceMainContent, showFormError } from "../../utils/formFeedback.js";
 import { currentRouteGeneration } from "../../state/routeGeneration.js";
+import { fold } from "../../utils/presentation.js";
 
 interface AddressAlias {
   address: string;
@@ -33,23 +34,106 @@ interface AddressRoutes {
   blockedRemoteAddresses: string[];
 }
 
+interface AddressKindChrome {
+  valueLabel: string;
+  valuePlaceholder: string;
+  targetLabel: string;
+  targetPlaceholder: string;
+  hint: string;
+  showTarget: boolean;
+}
+
+function addressKindChrome(kind: string, companyDomain: string): AddressKindChrome {
+  if (kind === "list") {
+    return {
+      valueLabel: "List address",
+      valuePlaceholder: `team@${companyDomain}`,
+      targetLabel: "Mailboxes",
+      targetPlaceholder: `ada@${companyDomain}, grace@${companyDomain}`,
+      hint: "Delivers to each mailbox listed (comma-separated).",
+      showTarget: true
+    };
+  }
+  if (kind === "domain") {
+    return {
+      valueLabel: "Domain",
+      valuePlaceholder: "example.com",
+      targetLabel: "Mailbox",
+      targetPlaceholder: "",
+      hint: "Accepts mail for this domain as well as the company domain.",
+      showTarget: false
+    };
+  }
+  if (kind === "catch-all") {
+    return {
+      valueLabel: "Domain",
+      valuePlaceholder: companyDomain,
+      targetLabel: "Mailbox",
+      targetPlaceholder: `ada@${companyDomain}`,
+      hint: "Sends unmatched addresses on this domain to one mailbox.",
+      showTarget: true
+    };
+  }
+  if (kind === "blocked") {
+    return {
+      valueLabel: "Address, domain, or remote address",
+      valuePlaceholder: "spam@example.com",
+      targetLabel: "Mailbox",
+      targetPlaceholder: "",
+      hint: "Blocks mail from this address, domain, or remote address.",
+      showTarget: false
+    };
+  }
+  return {
+    valueLabel: "Alias address",
+    valuePlaceholder: `sales@${companyDomain}`,
+    targetLabel: "Mailbox",
+    targetPlaceholder: `ada@${companyDomain}`,
+    hint: "Forwards this address to one mailbox.",
+    showTarget: true
+  };
+}
+
+function applyAddressKindChrome(companyDomain: string): void {
+  const kind = element<HTMLSelectElement>("#address-kind").value;
+  const chrome = addressKindChrome(kind, companyDomain);
+  const valueLabel = element<HTMLLabelElement>("label[for='address-value']");
+  const targetLabel = element<HTMLLabelElement>("label[for='address-target']");
+  const valueInput = element<HTMLInputElement>("#address-value");
+  const targetInput = element<HTMLInputElement>("#address-target");
+  const hint = element<HTMLElement>("#address-kind-hint");
+  valueLabel.textContent = chrome.valueLabel;
+  valueInput.placeholder = chrome.valuePlaceholder;
+  targetLabel.textContent = chrome.targetLabel;
+  targetInput.placeholder = chrome.targetPlaceholder;
+  hint.textContent = chrome.hint;
+  targetLabel.hidden = !chrome.showTarget;
+  targetInput.hidden = !chrome.showTarget;
+  targetInput.required = chrome.showTarget;
+  if (!chrome.showTarget) {
+    targetInput.value = "";
+  }
+}
+
 function routeRows(routes: AddressRoutes): string {
   const aliases = routes.aliases.map((alias) => `<li>${escapeHtml(alias.address)} goes to ${escapeHtml(alias.mailboxAddress)} <button class="quiet-button" type="button" data-remove="alias" data-value="${escapeHtml(alias.address)}">Remove</button></li>`).join("");
   const lists = routes.lists.map((list) => `<li>${escapeHtml(list.address)} goes to ${escapeHtml(list.mailboxAddresses.join(", "))} <button class="quiet-button" type="button" data-remove="list" data-value="${escapeHtml(list.address)}">Remove</button></li>`).join("");
   const domains = routes.domains.map((domain) => `<li>${escapeHtml(domain)} <button class="quiet-button" type="button" data-remove="domain" data-value="${escapeHtml(domain)}">Remove</button></li>`).join("");
   const catchAlls = routes.catchAllMailboxes.map((item) => `<li>Unmatched mail at ${escapeHtml(item.domain)} goes to ${escapeHtml(item.mailboxAddress)} <button class="quiet-button" type="button" data-remove="catch-all" data-value="${escapeHtml(item.domain)}">Remove</button></li>`).join("");
-  const blocked = [...routes.blockedSenders, ...routes.blockedDomains, ...routes.blockedRemoteAddresses].map((value) => `<li>${escapeHtml(value)} <button class="quiet-button" type="button" data-remove="blocked" data-value="${escapeHtml(value)}">Remove</button></li>`).join("");
+  const blockedItems = [...routes.blockedSenders, ...routes.blockedDomains, ...routes.blockedRemoteAddresses];
+  const blocked = blockedItems.map((value) => `<li>${escapeHtml(value)} <button class="quiet-button" type="button" data-remove="blocked" data-value="${escapeHtml(value)}">Remove</button></li>`).join("");
   return `
-    <section class="card stack-card"><h2>Aliases</h2>${aliases ? `<ul>${aliases}</ul>` : "<p>No aliases yet.</p>"}</section>
-    <section class="card stack-card"><h2>Lists</h2>${lists ? `<ul>${lists}</ul>` : "<p>No lists yet.</p>"}</section>
-    <section class="card stack-card"><h2>Extra domains</h2>${domains ? `<ul>${domains}</ul>` : "<p>Only the company domain is accepted.</p>"}</section>
-    <section class="card stack-card"><h2>Catch-all</h2>${catchAlls ? `<ul>${catchAlls}</ul>` : "<p>Unmatched addresses are rejected.</p>"}</section>
-    <section class="card stack-card"><h2>Blocked senders</h2>${blocked ? `<ul>${blocked}</ul>` : "<p>No blocked senders.</p>"}</section>`;
+    ${fold(`Aliases (${routes.aliases.length})`, aliases ? `<ul>${aliases}</ul>` : "<p>No aliases yet.</p>", routes.aliases.length >= 1)}
+    ${fold(`Lists (${routes.lists.length})`, lists ? `<ul>${lists}</ul>` : "<p>No lists yet.</p>", routes.lists.length >= 1)}
+    ${fold(`Extra domains (${routes.domains.length})`, domains ? `<ul>${domains}</ul>` : "<p>Only the company domain is accepted.</p>", routes.domains.length >= 1)}
+    ${fold(`Catch-all (${routes.catchAllMailboxes.length})`, catchAlls ? `<ul>${catchAlls}</ul>` : "<p>Unmatched addresses are rejected.</p>", routes.catchAllMailboxes.length >= 1)}
+    ${fold(`Blocked senders (${blockedItems.length})`, blocked ? `<ul>${blocked}</ul>` : "<p>No blocked senders.</p>", blockedItems.length >= 1)}`;
 }
 
 async function renderAddresses(notice = ""): Promise<void> {
   const generation = currentRouteGeneration();
   const payload = await requestJson<{ companyDomain: string; routes: AddressRoutes }>(ApiEndpoint.AddressRoutes);
+  const chrome = addressKindChrome("alias", payload.companyDomain);
   const saved = notice ? `<div class="notice"><h2>Saved</h2><p>${escapeHtml(notice)}</p></div>` : "";
   replaceMainContent(`
     <header class="page-header"><div><p class="eyebrow">${escapeHtml(payload.companyDomain)}</p><h1>Addresses</h1></div></header>
@@ -64,17 +148,20 @@ async function renderAddresses(notice = ""): Promise<void> {
         <option value="catch-all">Catch-all</option>
         <option value="blocked">Blocked sender</option>
       </select>
-      <label for="address-value">Address or domain</label>
-      <input id="address-value" required placeholder="sales@${escapeHtml(payload.companyDomain)}">
-      <label for="address-target">Mailbox</label>
-      <input id="address-target" placeholder="ada@${escapeHtml(payload.companyDomain)}">
-      <p class="hint">An alias or catch-all needs one mailbox. A list needs mailbox addresses separated by commas. A blocked sender can be an address, a domain, or a remote address.</p>
+      <label for="address-value">${escapeHtml(chrome.valueLabel)}</label>
+      <input id="address-value" required placeholder="${escapeHtml(chrome.valuePlaceholder)}">
+      <label for="address-target">${escapeHtml(chrome.targetLabel)}</label>
+      <input id="address-target" required placeholder="${escapeHtml(chrome.targetPlaceholder)}">
+      <p id="address-kind-hint" class="hint">${escapeHtml(chrome.hint)}</p>
       <div class="form-actions"><button class="primary-button" type="submit">${iconLabel("addUser", "Add address")}</button></div>
     </form>
     <div id="address-routes">${routeRows(payload.routes)}</div>`, generation, currentRouteGeneration());
   if (generation !== currentRouteGeneration()) {
     return;
   }
+  element<HTMLSelectElement>("#address-kind").addEventListener("change", () => {
+    applyAddressKindChrome(payload.companyDomain);
+  });
   element<HTMLFormElement>("#address-form").addEventListener("submit", (event) => {
     event.preventDefault();
     void saveAddress();
