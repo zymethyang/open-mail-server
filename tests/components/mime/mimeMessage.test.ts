@@ -52,8 +52,8 @@ describe("message format logic", () => {
     const image = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
     const raw = Buffer.from(
       [
-        "From: Tri Nguyen <zymethyang@gmail.com>",
-        "To: admin@getyouremail.cloud",
+        "From: Tri Nguyen <user@example.test>",
+        "To: admin@example.test",
         "Subject: Photo",
         'Content-Type: multipart/related; boundary="related"',
         "",

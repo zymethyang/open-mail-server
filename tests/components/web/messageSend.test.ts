@@ -17,7 +17,7 @@ describe("sending a message", () => {
       const setup = await requestJson(consoleServer.baseUrl, "POST", "/api/setup", {
         organizationName: "Acme",
         domain: "acme.test",
-        publicAddress: "149.28.152.245",
+        publicAddress: "203.0.113.10",
         displayName: "Ada Admin",
         address: "ada@acme.test",
         password: "correct-horse"

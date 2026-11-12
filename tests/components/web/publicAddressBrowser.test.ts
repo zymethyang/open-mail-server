@@ -88,7 +88,7 @@ describe("public address", () => {
       assert.match(problem, /public IP address/);
       assert.equal(problem.includes("network card"), false);
 
-      await submitSetup(browser, "149.28.152.245");
+      await submitSetup(browser, "203.0.113.10");
       await browser.waitUntil("The administrator should land on the overview", (page) => !page.applicationHidden && page.pathName === "/admin/overview");
       await browser.followPath("/admin/settings");
       const records = await waitFor(
@@ -102,8 +102,8 @@ describe("public address", () => {
           return zone.innerText;
         })()`
       );
-      assert.equal(records.includes("149.28.152.245"), true);
-      assert.equal(records.includes("v=spf1 ip4:149.28.152.245 ~all"), true);
+      assert.equal(records.includes("203.0.113.10"), true);
+      assert.equal(records.includes("v=spf1 ip4:203.0.113.10 ~all"), true);
       assert.equal(records.includes("v=DMARC1; p=none; rua=mailto:ada@acme.test"), true);
       assert.equal(records.includes("admin@acme.test"), false);
       assert.equal(records.includes("192.168.1.20"), false);

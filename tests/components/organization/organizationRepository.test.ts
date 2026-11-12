@@ -19,7 +19,7 @@ describe("organization repository interface", () => {
             domain: "not a domain",
             displayName: "Acme",
             requiredDomain: "",
-            publicAddress: "149.28.152.245",
+            publicAddress: "203.0.113.10",
             administratorAddress: "ada@acme.test"
           }),
         (error: unknown) => statusCodeOf(error) === 400
@@ -30,7 +30,7 @@ describe("organization repository interface", () => {
             domain: "example.test",
             displayName: "Acme",
             requiredDomain: "acme.test",
-            publicAddress: "149.28.152.245",
+            publicAddress: "203.0.113.10",
             administratorAddress: "ada@example.test"
           }),
         (error: unknown) => statusCodeOf(error) === 400 && (error as Error).message.includes("acme.test")
@@ -41,7 +41,7 @@ describe("organization repository interface", () => {
             domain: "acme.test",
             displayName: "   ",
             requiredDomain: "acme.test",
-            publicAddress: "149.28.152.245",
+            publicAddress: "203.0.113.10",
             administratorAddress: "ada@acme.test"
           }),
         (error: unknown) => statusCodeOf(error) === 400
@@ -63,7 +63,7 @@ describe("organization repository interface", () => {
             domain: "acme.test",
             displayName: "Acme",
             requiredDomain: "acme.test",
-            publicAddress: "149.28.152.245",
+            publicAddress: "203.0.113.10",
             administratorAddress: "ada@example.test"
           }),
         (error: unknown) => statusCodeOf(error) === 400 && (error as Error).message.includes("acme.test")
@@ -73,16 +73,16 @@ describe("organization repository interface", () => {
         domain: "  ACME.TEST ",
         displayName: "Acme\nCompany",
         requiredDomain: "acme.test",
-        publicAddress: " 149.28.152.245 ",
+        publicAddress: " 203.0.113.10 ",
         administratorAddress: " Ada@Acme.Test "
       });
       assert.equal(created.domain, "acme.test");
       assert.equal(created.displayName, "Acme Company");
-      assert.equal(created.publicAddress, "149.28.152.245");
+      assert.equal(created.publicAddress, "203.0.113.10");
       assert.equal(created.administratorAddress, "ada@acme.test");
       const stored = await repository.read();
       assert.equal(stored?.domain, "acme.test");
-      assert.equal(stored?.publicAddress, "149.28.152.245");
+      assert.equal(stored?.publicAddress, "203.0.113.10");
       assert.equal(stored?.administratorAddress, "ada@acme.test");
       await assert.rejects(
         () =>
@@ -90,7 +90,7 @@ describe("organization repository interface", () => {
             domain: "acme.test",
             displayName: "Again",
             requiredDomain: "",
-            publicAddress: "149.28.152.245",
+            publicAddress: "203.0.113.10",
             administratorAddress: "ada@acme.test"
           }),
         (error: unknown) => statusCodeOf(error) === 409

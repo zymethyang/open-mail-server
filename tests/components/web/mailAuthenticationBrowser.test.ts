@@ -29,7 +29,7 @@ describe("mail authentication in the browser", () => {
       const setup = await requestJson(consoleServer.baseUrl, "POST", "/api/setup", {
         organizationName: "Acme",
         domain: "acme.test",
-        publicAddress: "149.28.152.245",
+        publicAddress: "203.0.113.10",
         displayName: "Ada Admin",
         address: "ada@acme.test",
         password: "correct-horse"
@@ -60,8 +60,8 @@ describe("mail authentication in the browser", () => {
       assert.equal(text.includes("mail._domainkey.acme.test"), true);
       assert.equal(text.includes("v=DKIM1"), true);
       assert.equal(text.includes("_dmarc.acme.test"), true);
-      assert.equal(text.includes("149.28.152.245"), true);
-      assert.equal(text.includes("v=spf1 ip4:149.28.152.245 ~all"), true);
+      assert.equal(text.includes("203.0.113.10"), true);
+      assert.equal(text.includes("v=spf1 ip4:203.0.113.10 ~all"), true);
       assert.equal(text.includes("v=DMARC1; p=none; rua=mailto:ada@acme.test"), true);
       assert.equal(text.includes("network card"), false);
     } finally {

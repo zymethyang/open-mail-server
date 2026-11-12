@@ -9,7 +9,7 @@ describe("address route console", () => {
       const setup = await requestJson(consoleServer.baseUrl, "POST", "/api/setup", {
         organizationName: "Acme",
         domain: "acme.test",
-        publicAddress: "149.28.143.227",
+        publicAddress: "203.0.113.20",
         displayName: "Ada Admin",
         address: "ada@acme.test",
         password: "correct-horse"
@@ -121,7 +121,7 @@ describe("address route console", () => {
       const setup = await requestJson(consoleServer.baseUrl, "POST", "/api/setup", {
         organizationName: "Acme",
         domain: "acme.test",
-        publicAddress: "149.28.143.227",
+        publicAddress: "203.0.113.20",
         displayName: "Ada Admin",
         address: "ada@acme.test",
         password: "correct-horse"

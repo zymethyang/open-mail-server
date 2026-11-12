@@ -52,7 +52,7 @@ describe("web console interface", { concurrency: 1 }, () => {
     const wrongDomain = await requestJson(consoleServer.baseUrl, "POST", "/api/setup", {
       organizationName: "Acme",
       domain: "example.test",
-      publicAddress: "149.28.152.245",
+      publicAddress: "203.0.113.10",
       displayName: "Ada Admin",
       address: "ada@example.test",
       password: "correct-horse"
@@ -61,7 +61,7 @@ describe("web console interface", { concurrency: 1 }, () => {
     const shortPassword = await requestJson(consoleServer.baseUrl, "POST", "/api/setup", {
       organizationName: "Acme",
       domain: "acme.test",
-      publicAddress: "149.28.152.245",
+      publicAddress: "203.0.113.10",
       displayName: "Ada Admin",
       address: "ada@acme.test",
       password: "short"
@@ -84,13 +84,13 @@ describe("web console interface", { concurrency: 1 }, () => {
     const setup = await requestJson(consoleServer.baseUrl, "POST", "/api/setup", {
       organizationName: "Acme",
       domain: "acme.test",
-      publicAddress: "149.28.152.245",
+      publicAddress: "203.0.113.10",
       displayName: "Ada Admin",
       address: "ada@acme.test",
       password: "correct-horse"
     });
     assert.equal(setup.status, 201);
-    assert.equal(record(setup.payload.organization).publicAddress, "149.28.152.245");
+    assert.equal(record(setup.payload.organization).publicAddress, "203.0.113.10");
     assert.equal(record(setup.payload.organization).administratorAddress, "ada@acme.test");
     assert.equal(JSON.stringify(setup.payload).includes("passwordHash"), false);
     administratorCookie = setup.cookieHeader;
@@ -98,7 +98,7 @@ describe("web console interface", { concurrency: 1 }, () => {
     const again = await requestJson(consoleServer.baseUrl, "POST", "/api/setup", {
       organizationName: "Acme",
       domain: "acme.test",
-      publicAddress: "149.28.152.245",
+      publicAddress: "203.0.113.10",
       displayName: "Ada Admin",
       address: "ada@acme.test",
       password: "correct-horse"
@@ -114,8 +114,8 @@ describe("web console interface", { concurrency: 1 }, () => {
     const addressRecord = records.find((item) => item.type === "A" || item.type === "AAAA");
     const senderPolicy = records.find((item) => String(item.value).startsWith("v=spf1"));
     const messagePolicy = records.find((item) => String(item.host).startsWith("_dmarc."));
-    assert.equal(addressRecord?.value, "149.28.152.245");
-    assert.equal(String(senderPolicy?.value).includes("ip4:149.28.152.245"), true);
+    assert.equal(addressRecord?.value, "203.0.113.10");
+    assert.equal(String(senderPolicy?.value).includes("ip4:203.0.113.10"), true);
     assert.equal(messagePolicy?.value, "v=DMARC1; p=none; rua=mailto:ada@acme.test");
     assert.equal(String(record(signedIn.payload.hosting).zoneFile).includes("network card"), false);
     const anonymous = await requestJson(consoleServer.baseUrl, "GET", "/api/folders");

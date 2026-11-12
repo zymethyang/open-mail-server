@@ -59,7 +59,7 @@ describe("api access rules", () => {
     const setup = await requestJson(consoleServer.baseUrl, "POST", "/api/setup", {
       organizationName: "Acme",
       domain: "acme.test",
-      publicAddress: "149.28.152.245",
+      publicAddress: "203.0.113.10",
       displayName: "Ada Admin",
       address: "ada@acme.test",
       password: "correct-horse"
@@ -99,7 +99,7 @@ describe("api access rules", () => {
     assert.equal(record(administrator.payload.account).role, "administrator");
     assert.equal(record(administrator.payload.hosting).domain, "acme.test");
     assert.ok(Array.isArray(administrator.payload.listeners));
-    assert.equal(record(administrator.payload.organization).publicAddress, "149.28.152.245");
+    assert.equal(record(administrator.payload.organization).publicAddress, "203.0.113.10");
     assert.equal(record(administrator.payload.organization).administratorAddress, "ada@acme.test");
 
     for (const pathName of ["/api/admin/activity/summary", "/api/admin/activity", "/api/admin/activity/attention", "/api/admin/failed-email", "/api/admin/mailboxes", "/api/admin/settings", "/api/admin/certificate"]) {

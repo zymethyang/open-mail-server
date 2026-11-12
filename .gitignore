@@ -4,3 +4,7 @@ data-user-backup/
 dist/
 dist-test/
 .cursor/
+.env
+.env.*
+*.pem
+*.key

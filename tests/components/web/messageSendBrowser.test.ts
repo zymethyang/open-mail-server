@@ -105,7 +105,7 @@ describe("composer send errors in the browser", () => {
       const setup = await requestJson(consoleServer.baseUrl, "POST", "/api/setup", {
         organizationName: "Acme",
         domain: "acme.com",
-        publicAddress: "149.28.152.245",
+        publicAddress: "203.0.113.10",
         displayName: "Ada Admin",
         address: "ada@acme.com",
         password: "correct-horse"
@@ -184,11 +184,11 @@ describe("composer send errors in the browser", () => {
 
       await openComposer(browser);
       const outsideStarted = Date.now();
-      await sendTo(browser, "zymethyang@gmail.com");
+      await sendTo(browser, "user@example.test");
       await waitForComposer(browser, "Outside mail should close the composer before the other server answers", (state) => !state.open);
       assert.ok(Date.now() - outsideStarted < 2000);
       assert.equal(await browser.script(`document.querySelector(".mailbox-notice") ? "shown" : ""`), "");
-      assert.equal(consoleServer.sink.messages.some((message) => message.includes("zymethyang@gmail.com")), false);
+      assert.equal(consoleServer.sink.messages.some((message) => message.includes("user@example.test")), false);
 
       const started = Date.now();
       let inboxText = "";

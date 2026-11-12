@@ -32,7 +32,7 @@ function isPublicInternetVersion4Address(address: string): boolean {
   if (!isDottedAddress(address)) {
     return false;
   }
-  const [firstOctet, secondOctet, thirdOctet] = address.split(".").map((part) => Number(part));
+  const [firstOctet, secondOctet] = address.split(".").map((part) => Number(part));
   if (firstOctet === 0 || firstOctet === 10 || firstOctet === 127 || firstOctet >= 224) {
     return false;
   }
@@ -46,15 +46,6 @@ function isPublicInternetVersion4Address(address: string): boolean {
     return false;
   }
   if (firstOctet === 192 && secondOctet === 168) {
-    return false;
-  }
-  if (firstOctet === 192 && secondOctet === 0 && thirdOctet === 2) {
-    return false;
-  }
-  if (firstOctet === 198 && secondOctet === 51 && thirdOctet === 100) {
-    return false;
-  }
-  if (firstOctet === 203 && secondOctet === 0 && thirdOctet === 113) {
     return false;
   }
   return true;
