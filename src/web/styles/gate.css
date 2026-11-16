@@ -47,7 +47,6 @@
       rgba(12, 27, 42, 0.035) 0 1px,
       transparent 1px 14px
     );
-  animation: gate-atmosphere-drift 24s linear infinite;
 }
 
 .gate > *:not(.gate-atmosphere) {
@@ -69,6 +68,9 @@
   width: 48px;
   height: 48px;
   margin-bottom: 20px;
+}
+
+.gate.gate-entering .gate-brand-mark {
   opacity: 0;
   transform: translateY(14px);
   animation: gate-enter var(--gate-motion-enter) var(--gate-motion-ease) forwards;
@@ -83,6 +85,9 @@
   letter-spacing: -0.03em;
   line-height: 1.1;
   text-transform: none;
+}
+
+.gate.gate-entering .gate-product-name {
   opacity: 0;
   transform: translateY(14px);
   animation: gate-enter var(--gate-motion-enter) var(--gate-motion-ease) 80ms forwards;
@@ -96,6 +101,9 @@
   font-weight: 700;
   letter-spacing: -0.03em;
   line-height: 1.15;
+}
+
+.gate.gate-entering .gate-copy h1 {
   opacity: 0;
   transform: translateY(14px);
   animation: gate-enter var(--gate-motion-enter) var(--gate-motion-ease) 160ms forwards;
@@ -106,6 +114,9 @@
   color: var(--gate-ink-muted);
   font-size: 17px;
   line-height: 1.55;
+}
+
+.gate.gate-entering .gate-copy p:not(.gate-product-name) {
   opacity: 0;
   transform: translateY(14px);
   animation: gate-enter var(--gate-motion-enter) var(--gate-motion-ease) 240ms forwards;
@@ -117,10 +128,13 @@
   border-radius: 16px;
   box-shadow: var(--gate-shadow);
   color: var(--gate-ink);
+  transition: box-shadow 180ms var(--gate-motion-ease);
+}
+
+.gate.gate-entering .panel {
   opacity: 0;
   transform: translateY(14px);
   animation: gate-enter var(--gate-motion-enter) var(--gate-motion-ease) 120ms forwards;
-  transition: box-shadow 180ms var(--gate-motion-ease);
 }
 
 .gate .panel:focus-within {
@@ -234,11 +248,11 @@
     animation: none;
   }
 
-  .gate-brand-mark,
-  .gate-product-name,
-  .gate-copy h1,
-  .gate-copy p:not(.gate-product-name),
-  .gate .panel,
+  .gate.gate-entering .gate-brand-mark,
+  .gate.gate-entering .gate-product-name,
+  .gate.gate-entering .gate-copy h1,
+  .gate.gate-entering .gate-copy p:not(.gate-product-name),
+  .gate.gate-entering .panel,
   .gate-step-enter {
     animation: none;
     opacity: 1;

@@ -136,7 +136,19 @@ function serverExtensions(names: string[]): Buffer {
     sequence(
       extension("2.5.29.19", sequence()),
       extension("2.5.29.15", encodeTag(0x03, Buffer.from([0x00, 0xa0]))),
-      extension("2.5.29.37", sequence(encodeObjectIdentifier("1.3.6.1.5.5.7.3.1"))),
+      extension("2.5.29.37", sequence(encodeObjectIdentifier("1.3.6.1.5.5.7.3.1"), encodeObjectIdentifier("1.3.6.1.5.5.7.3.2"))),
+      extension("2.5.29.17", subjectAlternativeName(names))
+    )
+  );
+}
+
+function selfSignedRootExtensions(names: string[]): Buffer {
+  return encodeTag(
+    0xa3,
+    sequence(
+      extension("2.5.29.19", sequence()),
+      extension("2.5.29.15", encodeTag(0x03, Buffer.from([0x00, 0x0d]))),
+      extension("2.5.29.37", sequence(encodeObjectIdentifier("1.3.6.1.5.5.7.3.1"), encodeObjectIdentifier("1.3.6.1.5.5.7.3.2"))),
       extension("2.5.29.17", subjectAlternativeName(names))
     )
   );
@@ -198,7 +210,7 @@ export function generateSelfSignedCertificate(domains: string[]): GeneratedCerti
   const keys = createKeyPair();
   const commonName = names.find((name) => name !== "localhost" && !isInternetProtocolAddress(name)) || "localhost";
   const subjectName = directoryName(commonName);
-  const certificate = buildSignedCertificate(subjectName, subjectName, keys.publicKeyInfo, keys.privateKey, serverExtensions(names));
+  const certificate = buildSignedCertificate(subjectName, subjectName, keys.publicKeyInfo, keys.privateKey, selfSignedRootExtensions(names));
   return {
     privateKey: keys.privateKeyPem,
     certificate: pem("CERTIFICATE", certificate)

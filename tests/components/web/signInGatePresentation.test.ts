@@ -18,8 +18,16 @@ describe("sign-in gate presentation", () => {
     assert.equal(styles.includes('--gate-font-body: "Work Sans"'), true);
     assert.equal(styles.includes("gate-atmosphere-drift"), true);
     assert.equal(styles.includes("gate-enter"), true);
+    assert.equal(styles.includes("gate-entering"), true);
+    assert.equal(styles.includes(".gate.gate-entering .gate-brand-mark"), true);
+    assert.equal(styles.includes(".gate.gate-entering .panel"), true);
     assert.equal(styles.includes("gate-step-enter"), true);
     assert.equal(styles.includes("@media (prefers-reduced-motion: reduce)"), true);
+    assert.equal(/^\.gate-brand-mark\s*\{[^}]*opacity:\s*0/m.test(styles), false);
+    assert.equal(/^\.gate-product-name\s*\{[^}]*opacity:\s*0/m.test(styles), false);
+    assert.equal(/^\.gate-copy h1\s*\{[^}]*opacity:\s*0/m.test(styles), false);
+    assert.equal(/^\.gate-copy p:not\(\.gate-product-name\)\s*\{[^}]*opacity:\s*0/m.test(styles), false);
+    assert.equal(/^\.gate \.panel\s*\{[^}]*opacity:\s*0/m.test(styles), false);
     assert.equal(styles.includes("Inter"), false);
     assert.equal(styles.includes("Roboto"), false);
     assert.equal(styles.includes("#667eea"), false);

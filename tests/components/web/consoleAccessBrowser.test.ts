@@ -15,6 +15,7 @@ const adminApiPaths = [
   "/api/admin/certificate",
   "/api/admin/backup"
 ];
+const adminAcmePostPaths = ["/api/admin/certificate/acme/issue", "/api/admin/certificate/acme/renew"];
 const retiredCompanyPaths = [
   "/api/activity/summary",
   "/api/activity",
@@ -144,6 +145,9 @@ describe("console access in the browser", () => {
       for (const pathName of adminApiPaths) {
         assert.equal(await browser.readStatus(pathName), 200, pathName);
       }
+      for (const pathName of adminAcmePostPaths) {
+        assert.equal(await browser.readPostStatus(pathName), 400, pathName);
+      }
       for (const pathName of retiredCompanyPaths) {
         assert.equal(await browser.readStatus(pathName), 404, pathName);
       }
@@ -217,6 +221,9 @@ describe("console access in the browser", () => {
       assert.equal(reloaded.modeSwitchLabel, "");
       for (const pathName of adminApiPaths) {
         assert.equal(await browser.readStatus(pathName), 403, pathName);
+      }
+      for (const pathName of adminAcmePostPaths) {
+        assert.equal(await browser.readPostStatus(pathName), 403, pathName);
       }
       for (const pathName of retiredCompanyPaths) {
         assert.equal(await browser.readStatus(pathName), 404, pathName);

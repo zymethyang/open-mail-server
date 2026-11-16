@@ -223,6 +223,17 @@ export class ConsoleBrowser {
     return status;
   }
 
+  async readPostStatus(pathName: string, body = "{}"): Promise<number> {
+    const status = await this.evaluate(
+      `fetch(${JSON.stringify(pathName)}, { method: "POST", headers: { "Content-Type": "application/json" }, body: ${JSON.stringify(body)}, credentials: "same-origin" }).then((response) => response.status)`,
+      true
+    );
+    if (typeof status !== "number") {
+      throw new Error(`The page did not report a POST status for ${pathName}`);
+    }
+    return status;
+  }
+
   async readPage(): Promise<ConsolePageState> {
     const value = await this.evaluate(pageStateExpression);
     if (typeof value !== "string") {

@@ -1,4 +1,5 @@
 export enum ServerPort {
+  Http = 80,
   Web = 443,
   Smtp = 25,
   SmtpSecure = 465,

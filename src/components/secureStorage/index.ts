@@ -173,7 +173,7 @@ async function loadStorageKey(storageDirectory: string): Promise<LoadedStorageKe
     if (existing.length !== storageKeyBytes) {
       throw new Error("The storage key file must be 32 bytes");
     }
-    await chmod(keyPath, 0o600).catch(() => undefined);
+    await chmod(keyPath, 0o600);
     return { master: existing, derived: deriveStorageKey(existing) };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
@@ -186,6 +186,6 @@ async function loadStorageKey(storageDirectory: string): Promise<LoadedStorageKe
   const created = randomBytes(storageKeyBytes);
   await mkdir(storageDirectory, { recursive: true });
   await writeFile(keyPath, created, { mode: 0o600 });
-  await chmod(keyPath, 0o600).catch(() => undefined);
+  await chmod(keyPath, 0o600);
   return { master: created, derived: deriveStorageKey(created) };
 }

@@ -19,7 +19,23 @@ describe("settings fold order and defaults", () => {
     assert.ok(backupIndex > settingsFormIndex);
     assert.ok(listenersIndex > backupIndex);
 
-    assert.equal(source.includes('true\n      )}\n      <p class="hint">The web console on port'), true);
+    assert.equal(
+      source.includes(
+        'true\n      )}\n      <p class="hint">The web console and mail listeners use this certificate.</p>'
+      ),
+      true
+    );
+    assert.equal(source.includes('id="certificate-mode"'), true);
+    assert.equal(source.includes('id="certificate-mode-upload"'), true);
+    assert.equal(source.includes('id="certificate-mode-lets-encrypt"'), true);
+    assert.equal(source.includes('id="certificate-mode-upload-panel"'), true);
+    assert.equal(source.includes('id="certificate-mode-lets-encrypt-panel"'), true);
+    assert.equal(source.includes("How do you want to manage the certificate?"), true);
+    assert.equal(source.includes("Upload your own certificate"), true);
+    assert.equal(source.includes("selectCertificateMode"), true);
+    assert.equal(source.includes("applyCertificateModePanels"), true);
+    assert.equal(source.includes('id="certificate-acme-button"'), true);
+    assert.equal(source.includes('id="certificate-acme-dialog"'), true);
     assert.equal(source.includes('"settings-public-name"\n      )}\n      ${fold(\n        "Storage limits"'), true);
     assert.match(source, /fold\(\s*"Public name"[\s\S]*?false,\s*"settings-public-name"/);
     assert.match(source, /fold\(\s*"Storage limits"[\s\S]*?false,\s*"settings-storage-limits"/);

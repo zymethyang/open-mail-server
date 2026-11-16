@@ -23,6 +23,8 @@ const companyRequests: Array<{ method: string; pathName: string; body?: unknown 
   { method: "GET", pathName: "/api/admin/settings/export" },
   { method: "GET", pathName: "/api/admin/certificate" },
   { method: "POST", pathName: "/api/admin/certificate", body: { certificate: "not-a-certificate", privateKey: "not-a-key" } },
+  { method: "POST", pathName: "/api/admin/certificate/acme/issue", body: {} },
+  { method: "POST", pathName: "/api/admin/certificate/acme/renew", body: {} },
   { method: "HEAD", pathName: "/api/admin/activity/summary" }
 ];
 

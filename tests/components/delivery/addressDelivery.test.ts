@@ -109,6 +109,25 @@ describe("addresses people already use", () => {
     }
   });
 
+  it("skips content inspection for authenticated senders", async () => {
+    const storageDirectory = await createTemporaryStorage();
+    try {
+      const opened = await openDelivery(storageDirectory);
+      const virus = Buffer.from(
+        "From: ada@acme.test\r\nTo: bea@acme.test\r\nSubject: Virus\r\n\r\nX5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*\r\n"
+      );
+      const delivered = await opened.deliveryService.deliver({
+        ...deliveryRequest("ada@acme.test", ["bea@acme.test"]),
+        rawBuffer: virus,
+        authenticatedAddress: "ada@acme.test"
+      });
+      assert.deepEqual(delivered.localRecipients, ["bea@acme.test"]);
+      assert.equal((await opened.messageRepository.listMessages("bea@acme.test", "inbox")).length, 1);
+    } finally {
+      await removeTemporaryStorage(storageDirectory);
+    }
+  });
+
   it("enforces the saved message cap and mailbox quota", async () => {
     const storageDirectory = await createTemporaryStorage();
     try {

@@ -1,7 +1,6 @@
 import net from "node:net";
 import tls from "node:tls";
 import { generateAuthoritySignedCertificate } from "../../src/components/certificate/utils/selfSignedCertificate.js";
-import type { MailExchange } from "../../src/components/mailExchange/interfaces/mailExchange.js";
 
 export interface SmtpSink {
   port: number;
@@ -10,10 +9,6 @@ export interface SmtpSink {
   envelopeRecipients: string[];
   trustedCertificate: string;
   stop(): Promise<void>;
-}
-
-export function sinkMailExchange(sink: SmtpSink): MailExchange {
-  return { host: "127.0.0.1", port: sink.port, trustedCertificate: sink.trustedCertificate };
 }
 
 export async function startSmtpSink(options: { offerTransportSecurity?: boolean } = {}): Promise<SmtpSink> {

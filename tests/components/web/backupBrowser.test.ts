@@ -66,6 +66,18 @@ describe("backup settings in the browser", () => {
         })()`
       );
       assert.equal(backupFoldState, "closed");
+      const storageKeyNotice = await waitFor(
+        browser,
+        "The Backup card should show the storage key notice with the fold closed",
+        `(() => {
+          const notice = document.querySelector("#backup-storage-key-notice");
+          if (!(notice instanceof HTMLElement)) {
+            return "waiting";
+          }
+          return notice.textContent.trim() || "waiting";
+        })()`
+      );
+      assert.equal(storageKeyNotice, "Keep the storage key secret. Backups do not include it.");
       await browser.script(`(() => {
         const fold = document.querySelector("#settings-backup");
         if (fold instanceof HTMLDetailsElement) {
@@ -80,11 +92,16 @@ describe("backup settings in the browser", () => {
           if (!(card instanceof HTMLElement)) {
             return "waiting";
           }
-          const hintText = [...card.querySelectorAll("p.hint")].map((node) => node.textContent.trim()).join("\\n");
-          return hintText || "waiting";
+          const hints = [...card.querySelectorAll("p.hint")]
+            .map((node) => node.textContent.trim())
+            .filter((text) => text.startsWith("Restore replaces"));
+          return hints[0] || "waiting";
         })()`
       );
-      assert.equal(hint, "Restore replaces the mail store and storage key. The server restarts briefly to finish.");
+      assert.equal(
+        hint,
+        "Restore replaces the mail store. The live storage key stays in place. The server restarts briefly to finish."
+      );
 
       const expectedLabel = String(
         await browser.script(`(() => {
@@ -230,7 +247,7 @@ describe("backup settings in the browser", () => {
       );
       assert.equal(
         dialogBody,
-        "This replaces the mail store and storage key. The server restarts briefly; the console reconnects when it is ready."
+        "This replaces the mail store. The live storage key stays in place. The server restarts briefly; the console reconnects when it is ready."
       );
       assert.equal(/restart the server manually/i.test(dialogBody), false);
 
@@ -263,7 +280,7 @@ describe("backup settings in the browser", () => {
         deleteDisabled: boolean;
         radiosDisabled: boolean;
       };
-      assert.equal(restoringState.text, "Restoring… Replacing the mail store and storage key.");
+      assert.equal(restoringState.text, "Restoring… Replacing the mail store.");
       assert.equal(restoringState.createDisabled, true);
       assert.equal(restoringState.restoreDisabled, true);
       assert.equal(restoringState.deleteDisabled, true);
@@ -299,7 +316,10 @@ describe("backup settings in the browser", () => {
         45000
       );
       const restoredState = JSON.parse(restored) as { text: string; createDisabled: boolean };
-      assert.equal(restoredState.text, "Backup restored The mail store and storage key are in place again.");
+      assert.equal(
+        restoredState.text,
+        "Backup restored The mail store is in place again. The live storage key was left unchanged."
+      );
       assert.equal(restoredState.createDisabled, false);
       assert.equal(/Restart the server/i.test(restoredState.text), false);
       await delay(50);
@@ -519,7 +539,7 @@ describe("backup settings in the browser", () => {
       );
       assert.equal(
         outcome,
-        "Backup restored The mail store and storage key are in place again.",
+        "Backup restored The mail store is in place again. The live storage key was left unchanged.",
         "AC6 requires Backup restored after reconnect even when the restored backup predates the current browser session"
       );
     } finally {

@@ -5,8 +5,16 @@ import { ImapServer } from "../imap/index.js";
 import { describeListenError, listenWhenPortIsFree } from "../protocol/utils/listen.js";
 import { Pop3Server } from "../pop3/index.js";
 import { SmtpServer } from "../smtp/index.js";
-import { describeCertificateMaterial, prepareCertificateMaterial, storeCertificateMaterial } from "../certificate/index.js";
+import {
+  AcmeCertificateService,
+  describeStoredCertificate,
+  prepareCertificateMaterial,
+  sharedAcmeChallengeStore,
+  startAcmeHttpChallengeServer,
+  storeCertificateMaterial
+} from "../certificate/index.js";
 import { applyCertificate, followCertificateReplacement, publishCertificateReplacement } from "../certificate/certificateBroadcast.js";
+import { ServerPort } from "../configuration/enums/serverPort.js";
 import type { MailExchange } from "../mailExchange/interfaces/mailExchange.js";
 import type { MailRuntime } from "./interfaces/mailRuntime.js";
 import { createMailRuntime } from "./mailRuntime.js";
@@ -165,6 +173,35 @@ async function startService(runtime: MailRuntime): Promise<void> {
     return;
   }
   if (service === ServiceName.Web) {
+    const acmeCertificateService = new AcmeCertificateService({
+      storageDirectory: runtime.configuration.storageDirectory,
+      challengeStore: sharedAcmeChallengeStore,
+      resolveHostname: async () => {
+        const settings = await runtime.settingsRepository.read();
+        const organization = await runtime.organizationRepository.read();
+        return settings.publicHostname || organization?.domain || runtime.configuration.configuredDomain || "";
+      },
+      resolveContactEmail: async () => {
+        const organization = await runtime.organizationRepository.read();
+        return organization?.administratorAddress || "";
+      },
+      activateCertificate: async (certificatePem, privateKeyPem) => {
+        const prepared = prepareCertificateMaterial(certificatePem, privateKeyPem);
+        runtime.certificate.privateKey = prepared.privateKey;
+        runtime.certificate.certificate = prepared.certificate;
+        applyCertificate(runtime.certificate, servers);
+        publishCertificateReplacement();
+      }
+    });
+    await remember(
+      {
+        name: "HTTP",
+        port: ServerPort.Http,
+        security: "HTTP",
+        purpose: "Let’s Encrypt HTTP-01"
+      },
+      async () => startAcmeHttpChallengeServer(sharedAcmeChallengeStore, runtime.configuration.host, ServerPort.Http)
+    );
     const webServer = createWebServer({
       configuration: runtime.configuration,
       accountRepository: runtime.accountRepository,
@@ -179,7 +216,7 @@ async function startService(runtime: MailRuntime): Promise<void> {
       certificate: runtime.certificate,
       serverName: runtime.serverName,
       settingsRepository: runtime.settingsRepository,
-      readCertificate: async () => describeCertificateMaterial(runtime.certificate.certificate, runtime.certificate.privateKey),
+      readCertificate: async () => describeStoredCertificate(runtime.configuration.storageDirectory),
       async replaceCertificate(certificatePem, privateKeyPem, intermediateCertificatesPem = "") {
         const prepared = prepareCertificateMaterial(certificatePem, privateKeyPem, intermediateCertificatesPem);
         const description = await storeCertificateMaterial(runtime.configuration.storageDirectory, certificatePem, privateKeyPem, intermediateCertificatesPem);
@@ -189,6 +226,8 @@ async function startService(runtime: MailRuntime): Promise<void> {
         publishCertificateReplacement();
         return description;
       },
+      issueAcmeCertificate: () => acmeCertificateService.issue(),
+      renewAcmeCertificate: () => acmeCertificateService.renew(),
       requestProcessRestart() {
         thread.postMessage({ kind: WorkerMessageKind.ShutdownRequested });
       }
@@ -205,6 +244,9 @@ async function startService(runtime: MailRuntime): Promise<void> {
         return { server: webServer, port };
       }
     );
+    void acmeCertificateService.renewIfDue().catch((error: Error) => {
+      console.error(`Let’s Encrypt renewal skipped: ${error.message}`);
+    });
     return;
   }
   if (service === ServiceName.Queue) {

@@ -22,21 +22,31 @@ describe("backup presentation", () => {
   it("keeps the approved Backup card copy and omits manual restart instructions", async () => {
     const source = await readFile(settingsClientPath, "utf8");
     assert.equal(
-      source.includes("Restore replaces the mail store and storage key. The server restarts briefly to finish."),
+      source.includes('id="backup-storage-key-notice">Keep the storage key secret. Backups do not include it.'),
       true
     );
     assert.equal(
       source.includes(
-        "This replaces the mail store and storage key. The server restarts briefly; the console reconnects when it is ready."
+        "Restore replaces the mail store. The live storage key stays in place. The server restarts briefly to finish."
       ),
       true
     );
-    assert.equal(source.includes("<h2>Restoring…</h2><p>Replacing the mail store and storage key.</p>"), true);
-    assert.equal(source.includes("<h2>Reconnecting…</h2><p>Waiting for the server to come back.</p>"), true);
     assert.equal(
-      source.includes("<h2>Backup restored</h2><p>The mail store and storage key are in place again.</p>"),
+      source.includes(
+        "This replaces the mail store. The live storage key stays in place. The server restarts briefly; the console reconnects when it is ready."
+      ),
       true
     );
+    assert.equal(source.includes("<h2>Creating backup</h2><p>Copying the mail store.</p>"), true);
+    assert.equal(source.includes("<h2>Restoring…</h2><p>Replacing the mail store.</p>"), true);
+    assert.equal(source.includes("<h2>Reconnecting…</h2><p>Waiting for the server to come back.</p>"), true);
+    assert.equal(
+      source.includes(
+        "<h2>Backup restored</h2><p>The mail store is in place again. The live storage key was left unchanged.</p>"
+      ),
+      true
+    );
+    assert.equal(source.includes("mail store and storage key"), false);
     assert.equal(source.includes("Restart the server afterward"), false);
     assert.equal(/restart the server manually/i.test(source), false);
     assert.equal(/you must restart/i.test(source), false);

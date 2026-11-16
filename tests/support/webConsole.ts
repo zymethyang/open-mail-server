@@ -1,7 +1,17 @@
 import type { Server } from "node:http";
 import { AccountRepository } from "../../src/components/account/index.js";
 import { ActivityLogger } from "../../src/components/activity/index.js";
-import { describeCertificateMaterial, loadCertificate, prepareCertificateMaterial, storeCertificateMaterial } from "../../src/components/certificate/index.js";
+import {
+  AcmeCertificateService,
+  AcmeChallengeStore,
+  describeStoredCertificate,
+  loadCertificate,
+  prepareCertificateMaterial,
+  storeCertificateMaterial,
+  type AcmeIssuer
+} from "../../src/components/certificate/index.js";
+import { generateAuthoritySignedCertificate } from "../../src/components/certificate/utils/selfSignedCertificate.js";
+import { createAcmeAccountKey } from "../../src/components/certificate/utils/acmeJose.js";
 import { createOutgoingSigner } from "../../src/components/domainKey/index.js";
 import { DeliveryService } from "../../src/components/delivery/index.js";
 import type { MailExchangeResolver } from "../../src/components/mailExchange/interfaces/mailExchange.js";
@@ -74,6 +84,7 @@ export async function startWebConsole(options: {
   listenerStatus?: ListenerStatus[];
   mailExchangeResolver?: (sink: SmtpSink) => MailExchangeResolver;
   requestProcessRestart?: () => void;
+  acmeIssuer?: AcmeIssuer;
 } = {}): Promise<RunningWebConsole> {
   const storageDirectory = await createTemporaryStorage();
   const sink = await startSmtpSink();
@@ -109,6 +120,37 @@ export async function startWebConsole(options: {
     readRelay: async () => (await settingsRepository.read()).relay,
     signOutgoingMessage: createOutgoingSigner(storageDirectory, signingDomain)
   });
+  const stubAcmeIssuer: AcmeIssuer =
+    options.acmeIssuer ||
+    (async ({ hostname }) => {
+      const issued = generateAuthoritySignedCertificate([hostname]);
+      const account = createAcmeAccountKey();
+      return {
+        certificatePem: `${issued.certificate}${issued.intermediateCertificate}`,
+        privateKeyPem: issued.privateKey,
+        accountKeyPem: account.privateKeyPem,
+        accountUrl: "https://acme.test/account/stub"
+      };
+    });
+  const acmeCertificateService = new AcmeCertificateService({
+    storageDirectory,
+    challengeStore: new AcmeChallengeStore(),
+    resolveHostname: async () => {
+      const settings = await settingsRepository.read();
+      const organization = await organizationRepository.read();
+      return settings.publicHostname || organization?.domain || configuration.configuredDomain || "";
+    },
+    resolveContactEmail: async () => {
+      const organization = await organizationRepository.read();
+      return organization?.administratorAddress || "";
+    },
+    activateCertificate: async (certificatePem, privateKeyPem) => {
+      const prepared = prepareCertificateMaterial(certificatePem, privateKeyPem);
+      certificate.privateKey = prepared.privateKey;
+      certificate.certificate = prepared.certificate;
+    },
+    issuer: stubAcmeIssuer
+  });
   const server = createWebServer({
     configuration,
     accountRepository,
@@ -123,7 +165,7 @@ export async function startWebConsole(options: {
     certificate,
     serverName: async () => options.serverName || "127.0.0.1",
     settingsRepository,
-    readCertificate: async () => describeCertificateMaterial(certificate.certificate, certificate.privateKey),
+    readCertificate: async () => describeStoredCertificate(storageDirectory),
     replaceCertificate: async (certificatePem, privateKeyPem, intermediateCertificatesPem = "") => {
       const prepared = prepareCertificateMaterial(certificatePem, privateKeyPem, intermediateCertificatesPem);
       const description = await storeCertificateMaterial(storageDirectory, certificatePem, privateKeyPem, intermediateCertificatesPem);
@@ -131,6 +173,8 @@ export async function startWebConsole(options: {
       certificate.certificate = prepared.certificate;
       return description;
     },
+    issueAcmeCertificate: () => acmeCertificateService.issue(),
+    renewAcmeCertificate: () => acmeCertificateService.renew(),
     requestProcessRestart: options.requestProcessRestart
   });
   const port = await startWebServer(server, 0, options.listenHost || "127.0.0.1");

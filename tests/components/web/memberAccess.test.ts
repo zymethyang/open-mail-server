@@ -47,6 +47,8 @@ describe("member console access", () => {
         "/api/admin/mailboxes",
         "/api/admin/settings",
         "/api/admin/certificate",
+        "/api/admin/certificate/acme/issue",
+        "/api/admin/certificate/acme/renew",
         "/api/admin/backup"
       ];
       for (const pathName of companyPaths) {

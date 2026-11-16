@@ -1,13 +1,25 @@
 import { X509Certificate } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { isAcmeManagedCertificate } from "./utils/acmeProvenance.js";
 import { generateSelfSignedCertificate, normalizedCertificateNames } from "./utils/selfSignedCertificate.js";
 import { storeCertificateMaterial } from "./utils/storedCertificate.js";
 import { selfSignedCertificateNeedsRenewal } from "./utils/renewal.js";
 import type { ServerCertificate } from "./interfaces/serverCertificate.js";
 export type { CertificateDescription } from "./interfaces/certificateDescription.js";
 export type { ServerCertificate };
-export { describeCertificateMaterial, prepareCertificateMaterial, storeCertificateMaterial } from "./utils/storedCertificate.js";
+export {
+  describeCertificateMaterial,
+  describeStoredCertificate,
+  prepareCertificateMaterial,
+  storeCertificateMaterial
+} from "./utils/storedCertificate.js";
+export { AcmeChallengeStore, sharedAcmeChallengeStore } from "./utils/acmeChallengeStore.js";
+export { createAcmeHttpChallengeServer, startAcmeHttpChallengeServer } from "./utils/acmeHttpChallengeServer.js";
+export { AcmeCertificateService, type AcmeIssuer } from "./utils/acmeService.js";
+export { assertAcmeContactEmail, assertAcmeHostname } from "./utils/acmeHostname.js";
+export { isAcmeManagedCertificate } from "./utils/acmeProvenance.js";
+export { AcmeClient, letsEncryptDirectoryUrl } from "./utils/acmeClient.js";
 
 export async function ensureSelfSignedCertificate(storageDirectory: string, requiredNames: string[], now = Date.now()): Promise<ServerCertificate> {
   const directory = path.join(storageDirectory, "certificates");
@@ -17,7 +29,8 @@ export async function ensureSelfSignedCertificate(storageDirectory: string, requ
     const [privateKey, certificate] = await Promise.all([readFile(privateKeyPath, "utf8"), readFile(certificatePath, "utf8")]);
     const parsed = new X509Certificate(certificate);
     const uploaded = parsed.issuer !== parsed.subject;
-    if (uploaded || !selfSignedCertificateNeedsRenewal(certificate, now)) {
+    const acmeManaged = await isAcmeManagedCertificate(storageDirectory);
+    if (uploaded || acmeManaged || !selfSignedCertificateNeedsRenewal(certificate, now)) {
       return { privateKey, certificate };
     }
   } catch (error) {

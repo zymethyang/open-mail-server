@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, open, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, it } from "node:test";
 import {
@@ -41,22 +41,25 @@ describe("storage backup", () => {
     }
   });
 
-  it("backs up the storage key with the mail data and restores both", async () => {
+  it("excludes the storage key from new backups and leaves the live key unchanged on restore", async () => {
     const storageDirectory = await createTemporaryStorage();
     try {
-      await writeFile(path.join(storageDirectory, "storage-key"), Buffer.alloc(32, 7));
+      const liveKey = Buffer.alloc(32, 9);
+      await writeFile(path.join(storageDirectory, "storage-key"), liveKey);
       await writeFile(path.join(storageDirectory, "accounts.json"), Buffer.from("{\"accounts\":[]}"));
       const createdAt = new Date("2026-11-11T12:00:00.000Z");
       const backupDirectory = await createStorageBackup(storageDirectory, createdAt);
       assert.equal(path.basename(backupDirectory), "2026-11-11T12-00-00-000Z");
       assert.deepEqual(await listStorageBackups(storageDirectory), ["2026-11-11T12-00-00-000Z"]);
+      await assert.rejects(() => access(path.join(backupDirectory, "storage-key")));
+      assert.equal(await readFile(path.join(backupDirectory, "accounts.json"), "utf8"), "{\"accounts\":[]}");
 
-      await writeFile(path.join(storageDirectory, "storage-key"), Buffer.alloc(32, 9));
       await writeFile(path.join(storageDirectory, "accounts.json"), Buffer.from("changed"));
       await writeFile(path.join(storageDirectory, "extra.txt"), Buffer.from("after the backup"));
+      await writeFile(path.join(backupDirectory, "storage-key"), Buffer.alloc(32, 7));
       await restoreStorageBackup(storageDirectory, "2026-11-11T12-00-00-000Z");
 
-      assert.deepEqual(await readFile(path.join(storageDirectory, "storage-key")), Buffer.alloc(32, 7));
+      assert.deepEqual(await readFile(path.join(storageDirectory, "storage-key")), liveKey);
       assert.equal(await readFile(path.join(storageDirectory, "accounts.json"), "utf8"), "{\"accounts\":[]}");
       await assert.rejects(() => readFile(path.join(storageDirectory, "extra.txt")));
       assert.deepEqual(await listStorageBackups(storageDirectory), ["2026-11-11T12-00-00-000Z"]);
@@ -107,6 +110,44 @@ describe("storage backup", () => {
     try {
       assert.deepEqual(await listStorageBackups(storageDirectory), []);
     } finally {
+      await removeTemporaryStorage(storageDirectory);
+    }
+  });
+
+  it("backs up certificate files and mailbox index trees without the storage key", async () => {
+    const storageDirectory = await createTemporaryStorage();
+    try {
+      await mkdir(path.join(storageDirectory, "certificates"), { recursive: true });
+      await writeFile(path.join(storageDirectory, "certificates", "certificate.pem"), "certificate");
+      await writeFile(path.join(storageDirectory, "certificates", "private-key.pem"), "private-key");
+      await mkdir(path.join(storageDirectory, "mailboxes", "ada@acme.test", "inbox"), { recursive: true });
+      await writeFile(path.join(storageDirectory, "mailboxes", "ada@acme.test", "inbox", "index.json"), "[]");
+      const backupDirectory = await createStorageBackup(storageDirectory, new Date("2026-11-11T14:00:00.000Z"));
+      assert.equal(
+        await readFile(path.join(backupDirectory, "certificates", "certificate.pem"), "utf8"),
+        "certificate"
+      );
+      assert.equal(
+        await readFile(path.join(backupDirectory, "mailboxes", "ada@acme.test", "inbox", "index.json"), "utf8"),
+        "[]"
+      );
+      await assert.rejects(() => access(path.join(backupDirectory, "storage-key")));
+    } finally {
+      await removeTemporaryStorage(storageDirectory);
+    }
+  });
+
+  it("creates a backup while a live storage file remains open", async () => {
+    const storageDirectory = await createTemporaryStorage();
+    const accountsPath = path.join(storageDirectory, "accounts.json");
+    await writeFile(accountsPath, Buffer.from("{\"accounts\":[]}"));
+    const openHandle = await open(accountsPath, "r+");
+    try {
+      const backupDirectory = await createStorageBackup(storageDirectory, new Date("2026-11-11T15:00:00.000Z"));
+      assert.equal(await readFile(path.join(backupDirectory, "accounts.json"), "utf8"), "{\"accounts\":[]}");
+      await assert.rejects(() => access(path.join(backupDirectory, "storage-key")));
+    } finally {
+      await openHandle.close();
       await removeTemporaryStorage(storageDirectory);
     }
   });

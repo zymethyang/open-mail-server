@@ -29,7 +29,9 @@ async function acquireFileLock(name: string): Promise<() => Promise<void>> {
         await rm(lockPath, { force: true });
       };
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+      const code = (error as NodeJS.ErrnoException).code;
+      // On POSIX, opening an existing file with "wx" fails with EEXIST; on Windows it fails with EPERM.
+      if (code !== "EEXIST" && code !== "EPERM") {
         throw error;
       }
       try {

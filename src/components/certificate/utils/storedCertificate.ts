@@ -1,10 +1,11 @@
 import { X509Certificate, createPrivateKey } from "node:crypto";
-import { chmod, mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import tls from "node:tls";
 import type { CertificateDescription } from "../interfaces/certificateDescription.js";
 import type { ParsedCertificate } from "../interfaces/parsedCertificate.js";
 import type { PreparedCertificate } from "../interfaces/preparedCertificate.js";
+import { clearAcmeManagedCertificate, isAcmeManagedCertificate } from "./acmeProvenance.js";
 import { certificateRenewal } from "./renewal.js";
 
 const maximumPemCharacters = 64 * 1024;
@@ -136,6 +137,7 @@ export function prepareCertificateMaterial(certificatePem: string, privateKeyPem
         names: certificateNames(leaf.certificate),
         selfSigned: isTrustAnchor(leaf.certificate),
         intermediateCount: served.length - 1,
+        acmeManaged: false,
         ...certificateRenewal(leaf.certificate.validTo)
       },
       certificate,
@@ -157,7 +159,8 @@ export async function storeCertificateMaterial(
   storageDirectory: string,
   certificatePem: string,
   privateKeyPem: string,
-  intermediateCertificatesPem = ""
+  intermediateCertificatesPem = "",
+  options: { acmeManaged?: boolean } = {}
 ): Promise<CertificateDescription> {
   const prepared = prepareCertificateMaterial(certificatePem, privateKeyPem, intermediateCertificatesPem);
   const directory = path.join(storageDirectory, "certificates");
@@ -167,5 +170,21 @@ export async function storeCertificateMaterial(
   await writeFile(certificatePath, prepared.certificate, { encoding: "utf8", mode: 0o644 });
   await writeFile(keyPath, prepared.privateKey, { encoding: "utf8", mode: 0o600 });
   await chmod(keyPath, 0o600).catch(() => undefined);
-  return prepared.description;
+  if (options.acmeManaged) {
+    return { ...prepared.description, acmeManaged: true };
+  }
+  await clearAcmeManagedCertificate(storageDirectory);
+  return { ...prepared.description, acmeManaged: false };
+}
+
+export async function describeStoredCertificate(storageDirectory: string): Promise<CertificateDescription> {
+  const directory = path.join(storageDirectory, "certificates");
+  const [certificate, privateKey] = await Promise.all([
+    readFile(path.join(directory, "certificate.pem"), "utf8"),
+    readFile(path.join(directory, "private-key.pem"), "utf8")
+  ]);
+  return {
+    ...prepareCertificateMaterial(certificate, privateKey).description,
+    acmeManaged: await isAcmeManagedCertificate(storageDirectory)
+  };
 }

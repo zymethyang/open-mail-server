@@ -48,7 +48,7 @@ export function describeListenError(error: NodeJS.ErrnoException): string {
     return "port is already in use";
   }
   if (error.code === "EACCES" || error.code === "EPERM") {
-    return `permission denied. Port ${ServerPort.Smtp}, ${ServerPort.Web}, ${ServerPort.SmtpSecure}, ${ServerPort.Imap}, and ${ServerPort.ImapSecure} may require an administrator on Windows`;
+    return `permission denied. Port ${ServerPort.Smtp}, ${ServerPort.Http}, ${ServerPort.Web}, ${ServerPort.SmtpSecure}, ${ServerPort.Imap}, and ${ServerPort.ImapSecure} may require an administrator on Windows`;
   }
   return error.message || "could not start";
 }

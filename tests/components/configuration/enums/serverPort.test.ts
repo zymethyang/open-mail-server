@@ -4,6 +4,7 @@ import { ServerPort } from "../../../../src/components/configuration/enums/serve
 
 describe("server ports", () => {
   it("keeps the protocol ports", () => {
+    assert.equal(ServerPort.Http, 80);
     assert.equal(ServerPort.Web, 443);
     assert.equal(ServerPort.Smtp, 25);
     assert.equal(ServerPort.SmtpSecure, 465);

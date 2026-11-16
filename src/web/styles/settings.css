@@ -1,10 +1,20 @@
 .stack-card { margin-top: var(--space-5); }
-#certificate-card { margin-top: 0; }
+#certificate-card { margin-top: 0; opacity: 1; }
 #certificate-card .fold { margin-top: var(--space-4); }
 #certificate-card .fold + .hint { margin-top: var(--space-4); }
+#certificate-card .hint + .hint { margin-top: var(--space-2); }
+#certificate-card .certificate-mode { margin: var(--space-4) 0 0; padding: 0; border: 0; }
+#certificate-card .certificate-mode legend { font-weight: 600; margin-bottom: var(--space-2); }
+#certificate-card .certificate-mode .choice { margin-top: var(--space-2); margin-bottom: 0; }
+#certificate-card .certificate-mode-panel { margin-top: var(--space-4); opacity: 1; }
+#certificate-card .certificate-mode-panel .form-actions { margin-top: var(--space-4); flex-wrap: wrap; gap: var(--space-3); }
+#certificate-card .certificate-mode-panel .form-actions .primary-button { width: auto; min-width: min(100%, 16rem); }
 #certificate-card .record-list { margin-bottom: 0; }
 #certificate-card .choice { margin-bottom: 0; }
+#certificate-acme-dialog + .fold,
 #certificate-dialog + .fold { margin-top: var(--space-5); }
+#certificate-acme-dialog p { margin: 0 0 var(--space-3); line-height: 1.45; }
+#certificate-acme-dialog p:last-of-type { margin-bottom: var(--space-4); }
 #settings-form { margin-top: var(--space-5); }
 #settings-form .hint + .fold { margin-top: var(--space-4); }
 #settings-form .fold + .fold { margin-top: var(--space-4); }

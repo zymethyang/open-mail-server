@@ -3,12 +3,7 @@ import { normalizedCertificateNames } from "./selfSignedCertificate.js";
 
 export const certificateRenewalWindowDays = 14;
 
-export interface CertificateRenewal {
-  daysRemaining: number;
-  renewalRequired: boolean;
-}
-
-export function certificateRenewal(validUntil: string, now = Date.now()): CertificateRenewal {
+export function certificateRenewal(validUntil: string, now = Date.now()) {
   const expires = Date.parse(validUntil);
   if (Number.isNaN(expires)) {
     return { daysRemaining: 0, renewalRequired: true };

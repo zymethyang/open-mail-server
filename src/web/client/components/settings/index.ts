@@ -21,6 +21,9 @@ function presentCertificateDate(value: string): string {
 }
 
 function certificateKind(certificate: CertificateDescription): string {
+  if (certificate.acmeManaged) {
+    return "Let’s Encrypt";
+  }
   if (certificate.selfSigned) {
     return "Self-signed";
   }
@@ -34,11 +37,22 @@ function certificateKind(certificate: CertificateDescription): string {
   return "Issued by a certificate authority";
 }
 
+function certificateRenewalHint(certificate: CertificateDescription): string {
+  if (!certificate.renewalRequired) {
+    return "";
+  }
+  const days = certificate.daysRemaining ?? 0;
+  if (certificate.acmeManaged) {
+    return `<p class="hint">Expires in ${days} days. Renew with Let’s Encrypt before it expires.</p>`;
+  }
+  if (certificate.selfSigned) {
+    return `<p class="hint">Expires in ${days} days. Self-signed renews automatically; uploaded certificates need a new file.</p>`;
+  }
+  return `<p class="hint">Expires in ${days} days. Upload a new certificate before it expires.</p>`;
+}
+
 function certificateMarkup(certificate: CertificateDescription): string {
   const names = certificate.names && certificate.names.length ? certificate.names.join(", ") : "None listed";
-  const renewal = certificate.renewalRequired
-    ? `<p class="hint">Expires in ${certificate.daysRemaining ?? 0} days. Self-signed renews automatically; uploaded certificates need a new file.</p>`
-    : "";
   return `<dl class="record-list">
     <div><dt>Subject</dt><dd>${escapeHtml(certificate.subject)}</dd></div>
     <div><dt>Issuer</dt><dd>${escapeHtml(certificate.issuer)}</dd></div>
@@ -46,7 +60,40 @@ function certificateMarkup(certificate: CertificateDescription): string {
     <div><dt>Valid from</dt><dd>${escapeHtml(presentCertificateDate(certificate.validFrom))}</dd></div>
     <div><dt>Valid until</dt><dd>${escapeHtml(presentCertificateDate(certificate.validUntil))}</dd></div>
     <div><dt>Kind</dt><dd>${escapeHtml(certificateKind(certificate))}</dd></div>
-  </dl>${renewal}`;
+  </dl>${certificateRenewalHint(certificate)}`;
+}
+
+function acmeButtonLabel(acmeManaged: boolean): string {
+  return acmeManaged ? "Renew Let’s Encrypt certificate" : "Get Let’s Encrypt certificate";
+}
+
+function certificateModeValue(): "upload" | "lets-encrypt" {
+  const selected = document.querySelector<HTMLInputElement>('input[name="certificate-mode"]:checked');
+  return selected?.value === "lets-encrypt" ? "lets-encrypt" : "upload";
+}
+
+function applyCertificateModePanels(mode: "upload" | "lets-encrypt"): void {
+  const uploadPanel = element<HTMLElement>("#certificate-mode-upload-panel");
+  const letsEncryptPanel = element<HTMLElement>("#certificate-mode-lets-encrypt-panel");
+  uploadPanel.hidden = mode !== "upload";
+  letsEncryptPanel.hidden = mode !== "lets-encrypt";
+}
+
+function selectCertificateMode(mode: "upload" | "lets-encrypt"): void {
+  const uploadInput = element<HTMLInputElement>("#certificate-mode-upload");
+  const letsEncryptInput = element<HTMLInputElement>("#certificate-mode-lets-encrypt");
+  uploadInput.checked = mode === "upload";
+  letsEncryptInput.checked = mode === "lets-encrypt";
+  applyCertificateModePanels(mode);
+}
+
+function updateLetsEncryptContext(hostname: string, email: string): void {
+  element("#certificate-acme-hostname").textContent = hostname
+    ? `We’ll get a certificate for ${hostname}.`
+    : "We’ll get a certificate for this server’s public name.";
+  element("#certificate-acme-contact").textContent = email
+    ? `Contact for Let’s Encrypt: ${email}.`
+    : "Contact for Let’s Encrypt: the administrator email.";
 }
 
 function readTextFile(file: File): Promise<string> {
@@ -218,12 +265,29 @@ function bindCertificateCard(): void {
   const summary = element<HTMLElement>("#certificate-summary");
   const dialog = element<HTMLDialogElement>("#certificate-dialog");
   const dialogSummary = element<HTMLElement>("#certificate-dialog-summary");
-  requestJson<{ certificate: CertificateDescription }>(ApiEndpoint.Certificate)
+  const acmeDialog = element<HTMLDialogElement>("#certificate-acme-dialog");
+  const acmeButton = element<HTMLButtonElement>("#certificate-acme-button");
+  let acmeManaged = false;
+  let acmeHostname = "";
+  let administratorEmail = "";
+  document.querySelectorAll<HTMLInputElement>('input[name="certificate-mode"]').forEach((input) => {
+    input.addEventListener("change", () => {
+      applyCertificateModePanels(certificateModeValue());
+    });
+  });
+  requestJson<{ certificate: CertificateDescription; acmeHostname?: string; administratorEmail?: string }>(ApiEndpoint.Certificate)
     .then((payload) => {
+      acmeManaged = Boolean(payload.certificate.acmeManaged);
+      acmeHostname = payload.acmeHostname || "";
+      administratorEmail = payload.administratorEmail || "";
       element("#certificate-details").innerHTML = certificateMarkup(payload.certificate);
+      acmeButton.textContent = acmeButtonLabel(acmeManaged);
+      updateLetsEncryptContext(acmeHostname, administratorEmail);
+      selectCertificateMode(acmeManaged ? "lets-encrypt" : "upload");
     })
     .catch((error: unknown) => {
       summary.hidden = false;
+      summary.className = "error-summary";
       summary.innerHTML = `<h2>There is a problem</h2><p>${escapeHtml(errorMessage(error))}</p>`;
     });
   element<HTMLButtonElement>("#certificate-upload-button").addEventListener("click", () => {
@@ -234,6 +298,61 @@ function bindCertificateCard(): void {
   });
   element<HTMLButtonElement>("#certificate-cancel").addEventListener("click", () => {
     dialog.close();
+  });
+  acmeButton.addEventListener("click", () => {
+    const title = element("#certificate-acme-dialog-title");
+    title.textContent = acmeManaged ? "Renew the Let’s Encrypt certificate?" : "Get a Let’s Encrypt certificate?";
+    element("#certificate-acme-body-1").textContent =
+      `We’ll get a certificate for ${acmeHostname || "this server’s public name"} from Let’s Encrypt.`;
+    element("#certificate-acme-body-3").textContent = administratorEmail
+      ? `Contact for Let’s Encrypt: ${administratorEmail}.`
+      : "Contact for Let’s Encrypt: the administrator email.";
+    acmeDialog.showModal();
+  });
+  element<HTMLButtonElement>("#certificate-acme-cancel").addEventListener("click", () => {
+    acmeDialog.close();
+  });
+  element<HTMLButtonElement>("#certificate-acme-confirm").addEventListener("click", () => {
+    acmeDialog.close();
+    const renewing = acmeManaged;
+    summary.className = "notice";
+    summary.hidden = false;
+    summary.innerHTML = "<h2>Requesting certificate</h2><p>Talking to Let’s Encrypt. This can take a short time.</p>";
+    summary.focus();
+    acmeButton.disabled = true;
+    const endpoint = renewing ? ApiEndpoint.CertificateAcmeRenew : ApiEndpoint.CertificateAcmeIssue;
+    void requestJson<{ certificate: CertificateDescription; acmeHostname?: string; administratorEmail?: string }>(endpoint, {
+      method: "POST",
+      body: "{}"
+    })
+      .then((payload) => {
+        acmeManaged = Boolean(payload.certificate.acmeManaged);
+        if (payload.acmeHostname) {
+          acmeHostname = payload.acmeHostname;
+        }
+        if (payload.administratorEmail) {
+          administratorEmail = payload.administratorEmail;
+        }
+        acmeButton.textContent = acmeButtonLabel(acmeManaged);
+        updateLetsEncryptContext(acmeHostname, administratorEmail);
+        selectCertificateMode(acmeManaged ? "lets-encrypt" : "upload");
+        element("#certificate-details").innerHTML = certificateMarkup(payload.certificate);
+        summary.className = "notice";
+        summary.hidden = false;
+        summary.innerHTML = renewing
+          ? "<h2>Let’s Encrypt certificate renewed</h2><p>Mail and the web console use this certificate now.</p>"
+          : "<h2>Let’s Encrypt certificate ready</h2><p>Mail and the web console use this certificate now.</p>";
+        summary.focus();
+      })
+      .catch((error: unknown) => {
+        summary.className = "error-summary";
+        summary.hidden = false;
+        summary.innerHTML = `<h2>There is a problem</h2><p>${escapeHtml(errorMessage(error))}</p>`;
+        summary.focus();
+      })
+      .finally(() => {
+        acmeButton.disabled = false;
+      });
   });
   element<HTMLFormElement>("#certificate-form").addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -260,12 +379,16 @@ function bindCertificateCard(): void {
         method: "POST",
         body: JSON.stringify({ certificate, privateKey, intermediateCertificates })
       });
+      acmeManaged = Boolean(payload.certificate.acmeManaged);
+      acmeButton.textContent = acmeButtonLabel(acmeManaged);
+      selectCertificateMode(acmeManaged ? "lets-encrypt" : "upload");
       element("#certificate-details").innerHTML = certificateMarkup(payload.certificate);
       form.reset();
       dialog.close();
       summary.className = "notice";
       summary.hidden = false;
-      summary.innerHTML = "<h2>Certificate uploaded</h2><p>New mail connections use this certificate.</p>";
+      summary.innerHTML = "<h2>Certificate uploaded</h2><p>New mail and web connections use this certificate.</p>";
+      summary.focus();
     } catch (error) {
       showFormError(form, dialogSummary, errorMessage(error), "certificate-file");
     }
@@ -283,7 +406,7 @@ function bindBackupCard(initialBackups: string[]): void {
     setBackupControlsDisabled(true);
     summary.className = "notice";
     summary.hidden = false;
-    summary.innerHTML = "<h2>Creating backup</h2><p>Copying the mail store and storage key.</p>";
+    summary.innerHTML = "<h2>Creating backup</h2><p>Copying the mail store.</p>";
     void requestJson<{ backupName: string }>(ApiEndpoint.Backup, { method: "POST", body: "{}" })
       .then(async (payload) => {
         await refreshBackupList(summary);
@@ -358,7 +481,7 @@ function bindBackupCard(initialBackups: string[]): void {
     setBackupControlsDisabled(true);
     summary.className = "notice";
     summary.hidden = false;
-    summary.innerHTML = "<h2>Restoring…</h2><p>Replacing the mail store and storage key.</p>";
+    summary.innerHTML = "<h2>Restoring…</h2><p>Replacing the mail store.</p>";
     void requestJson<{ restored: boolean; backupName: string; restarting?: boolean }>(ApiEndpoint.BackupRestore, {
       method: "POST",
       body: JSON.stringify({ backupName })
@@ -401,7 +524,7 @@ async function finishRestoreReconnect(summary: HTMLElement): Promise<void> {
   setBackupControlsDisabled(false);
   summary.className = "notice";
   summary.hidden = false;
-  summary.innerHTML = "<h2>Backup restored</h2><p>The mail store and storage key are in place again.</p>";
+  summary.innerHTML = "<h2>Backup restored</h2><p>The mail store is in place again. The live storage key was left unchanged.</p>";
   summary.focus();
 }
 
@@ -435,8 +558,27 @@ async function renderSettings(saved = false): Promise<void> {
         `<div id="certificate-details"><p class="hint">Loading the current certificate.</p></div>`,
         true
       )}
-      <p class="hint">The web console on port ${ServerPort.Web} uses this certificate. Upload a PEM certificate and private key to replace it.</p>
-      <div class="form-actions"><button id="certificate-upload-button" class="quiet-button" type="button">Upload certificate</button></div>
+      <p class="hint">The web console and mail listeners use this certificate.</p>
+      <fieldset id="certificate-mode" class="certificate-mode">
+        <legend>How do you want to manage the certificate?</legend>
+        <label class="choice" for="certificate-mode-upload"><input id="certificate-mode-upload" type="radio" name="certificate-mode" value="upload" checked> Upload your own certificate</label>
+        <label class="choice" for="certificate-mode-lets-encrypt"><input id="certificate-mode-lets-encrypt" type="radio" name="certificate-mode" value="lets-encrypt"> Let’s Encrypt</label>
+      </fieldset>
+      <div id="certificate-mode-upload-panel" class="certificate-mode-panel">
+        <p class="hint">Upload your PEM certificate and private key. Add intermediates if you have them. Mail and the web console use it right away.</p>
+        <div class="form-actions">
+          <button id="certificate-upload-button" class="primary-button" type="button">Upload certificate</button>
+        </div>
+      </div>
+      <div id="certificate-mode-lets-encrypt-panel" class="certificate-mode-panel" hidden>
+        <p class="hint" id="certificate-acme-hostname">We’ll get a certificate for this server’s public name.</p>
+        <p class="hint">Let’s Encrypt checks this over port 80. Point its DNS at this server and open port 80.</p>
+        <p class="hint" id="certificate-acme-contact">Contact for Let’s Encrypt: the administrator email.</p>
+        <p class="hint">Local names (localhost, .test, 127.0.0.1) can’t be issued one.</p>
+        <div class="form-actions">
+          <button id="certificate-acme-button" class="primary-button" type="button">Get Let’s Encrypt certificate</button>
+        </div>
+      </div>
     </section>
     <dialog id="certificate-dialog" class="modal" aria-labelledby="certificate-dialog-title">
       <form id="certificate-form">
@@ -448,12 +590,23 @@ async function renderSettings(saved = false): Promise<void> {
         <input id="certificate-chain-file" type="file" accept=".pem,.crt,.cer,.ca-bundle">
         <label for="private-key-file">Private key file</label>
         <input id="private-key-file" type="file" accept=".pem,.key">
-        <p class="hint">Upload the PEM certificate and private key. Add the intermediate file if you have one. Mail uses them immediately.</p>
+        <p class="hint">Upload the PEM certificate and private key. Add the intermediate file if you have one. Mail and the web console use them immediately.</p>
         <div class="form-actions">
           <button id="certificate-cancel" class="quiet-button" type="button">Cancel</button>
           <button class="primary-button" type="submit">Upload</button>
         </div>
       </form>
+    </dialog>
+    <dialog id="certificate-acme-dialog" class="modal" aria-labelledby="certificate-acme-dialog-title">
+      <h2 id="certificate-acme-dialog-title">Get a Let’s Encrypt certificate?</h2>
+      <p id="certificate-acme-body-1">We’ll get a certificate for this server’s public name from Let’s Encrypt.</p>
+      <p id="certificate-acme-body-2">Before you continue, point that DNS name at this server and make sure port 80 is open and reachable from the internet.</p>
+      <p id="certificate-acme-body-3">Contact for Let’s Encrypt: the administrator email.</p>
+      <p id="certificate-acme-body-4">Local names (localhost, .test, 127.0.0.1) can’t be issued one.</p>
+      <div class="form-actions">
+        <button id="certificate-acme-cancel" class="quiet-button" type="button">Cancel</button>
+        <button id="certificate-acme-confirm" class="primary-button" type="button">Continue</button>
+      </div>
     </dialog>
     ${renderDnsRecords(summary.hosting)}
     <form id="settings-form" class="card">
@@ -501,11 +654,12 @@ async function renderSettings(saved = false): Promise<void> {
     <section class="card stack-card" id="backup-card">
       <h2>Backup</h2>
       <div id="backup-summary" class="error-summary" tabindex="-1" hidden></div>
+      <p class="hint" id="backup-storage-key-notice">Keep the storage key secret. Backups do not include it.</p>
       ${fold(
         "Create and restore",
         `<div class="form-actions"><button id="create-backup" class="quiet-button" type="button">Create backup</button></div>
       <div id="backup-list-host"></div>
-      <p class="hint">Restore replaces the mail store and storage key. The server restarts briefly to finish.</p>
+      <p class="hint">Restore replaces the mail store. The live storage key stays in place. The server restarts briefly to finish.</p>
       <div class="form-actions">
         <button id="delete-backup" class="danger-button" type="button" disabled>Delete</button>
         <button id="restore-backup" class="caution-button" type="button" disabled>Restore</button>
@@ -516,7 +670,7 @@ async function renderSettings(saved = false): Promise<void> {
     </section>
     <dialog id="backup-restore-dialog" class="modal" aria-labelledby="backup-restore-dialog-title">
       <h2 id="backup-restore-dialog-title">Restore this backup?</h2>
-      <p>This replaces the mail store and storage key. The server restarts briefly; the console reconnects when it is ready.</p>
+      <p>This replaces the mail store. The live storage key stays in place. The server restarts briefly; the console reconnects when it is ready.</p>
       <div class="form-actions">
         <button id="backup-restore-cancel" class="quiet-button" type="button">Cancel</button>
         <button id="backup-restore-confirm" class="caution-button" type="button">Restore</button>

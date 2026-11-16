@@ -18,7 +18,7 @@ RUN npm ci \
 
 VOLUME ["/opt/email-server/data"]
 
-EXPOSE 25 443 465 587 143 993 110 995
+EXPOSE 25 80 443 465 587 143 993 110 995
 
 USER node
 

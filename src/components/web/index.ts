@@ -1,10 +1,8 @@
-import { randomBytes } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import http from "node:http";
 import https from "node:https";
 import path from "node:path";
-import tls from "node:tls";
 import { maximumConfigurableMessageBytes } from "../configuration/constants/serverDefaults.js";
 import { contentTypes } from "./constants/contentTypes.js";
 import type { Configuration } from "../configuration/index.js";
@@ -16,10 +14,8 @@ import { MailProtocol } from "../protocol/enums/mailProtocol.js";
 import { RelaySecurity } from "../settings/enums/relaySecurity.js";
 import { MailFolderName } from "../message/enums/mailFolderName.js";
 import { ApiEndpoint, matchApiEndpoint } from "./enums/apiEndpoint.js";
-import type { MessageRecord } from "../message/interfaces/mailTypes.js";
 import type { MailboxEvents } from "../mailboxEvents/interfaces/mailboxEvents.js";
-import type { PublicAccount } from "../account/interfaces/accountRecord.js";
-import type { PendingSignIn, ServerRequest } from "./interfaces/serverRequest.js";
+import type { ServerRequest } from "./interfaces/serverRequest.js";
 import { assertAddressList, isValidAddress, normalizeAddress, parseAddressList } from "../text/index.js";
 import type { DeliveryService } from "../delivery/interfaces/delivery.js";
 import { checkPublicPorts } from "../publicPort/index.js";
@@ -37,9 +33,7 @@ import {
   restoreStorageBackup,
   tryBeginRestore
 } from "../backup/index.js";
-import { displayedImageType } from "./utils/displayedImageType.js";
-import { createMessageIdentifier, createRawMessage, parseRawMessage, sanitizeMessageHtml, type OutboundAttachment } from "../mime/index.js";
-import { createSnippet } from "../mime/index.js";
+import { createMessageIdentifier, createRawMessage, parseRawMessage, sanitizeMessageHtml } from "../mime/index.js";
 import { listen } from "../protocol/utils/listen.js";
 import { secureOptions } from "../protocol/utils/transportSecurity.js";
 import type { AccountRepository } from "../account/interfaces/accountRepository.js";
@@ -53,6 +47,23 @@ import type { SignInGuard } from "../signIn/interfaces/signInGuard.js";
 import type { ListenerStatus } from "./interfaces/listenerStatus.js";
 import { projectDirectoryFrom } from "../configuration/utils/projectDirectory.js";
 import { messageSendError } from "./utils/messageSendError.js";
+import {
+  writeSessionCookie,
+  readCookies,
+  connectionIsSecure,
+  writePendingSignIn,
+  readPendingSignIn,
+  clearPendingSignIn,
+  attachmentDownloadHeaders,
+  sendJson,
+  scheduleProcessRestart,
+  textValue,
+  limitsFromBody,
+  readOutboundAttachments,
+  summary,
+  requireAccount,
+  requireAdministrator
+} from "./routes/shared.js";
 import { authenticatorImage, createOneTimePasswordSecret, oneTimePasswordUri } from "../oneTimePassword/index.js";
 export type { ListenerStatus };
 
@@ -131,224 +142,6 @@ async function readJsonBody(request: http.IncomingMessage): Promise<Record<strin
   }
 }
 
-function readCookies(request: http.IncomingMessage): Record<string, string> {
-  const header = request.headers.cookie || "";
-  const cookies: Record<string, string> = {};
-  for (const part of header.split(";")) {
-    const separator = part.indexOf("=");
-    if (separator === -1) {
-      continue;
-    }
-    cookies[part.slice(0, separator).trim()] = decodeURIComponent(part.slice(separator + 1).trim());
-  }
-  return cookies;
-}
-
-function connectionIsSecure(request: http.IncomingMessage): boolean {
-  if (request.socket instanceof tls.TLSSocket && request.socket.encrypted) {
-    return true;
-  }
-  const remoteAddress = request.socket.remoteAddress || "";
-  const localPeer = remoteAddress === "127.0.0.1" || remoteAddress === "::1" || remoteAddress === "::ffff:127.0.0.1";
-  if (!localPeer) {
-    return false;
-  }
-  const forwarded = request.headers["x-forwarded-proto"];
-  const firstValue = Array.isArray(forwarded) ? forwarded[0] : forwarded || "";
-  return firstValue.split(",")[0].trim().toLowerCase() === "https";
-}
-
-function cookieLine(name: string, value: string, secure: boolean, maxAge: number): string {
-  const secureFlag = secure ? "; Secure" : "";
-  return `${name}=${encodeURIComponent(value)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}${secureFlag}`;
-}
-
-function writeSessionCookie(response: http.ServerResponse, identifier: string, secure: boolean): void {
-  response.setHeader("Set-Cookie", [
-    cookieLine("session", identifier, secure, identifier ? 7 * 24 * 60 * 60 : 0),
-    cookieLine("pending", "", secure, 0)
-  ]);
-}
-
-const pendingSignIns = new Map<string, PendingSignIn>();
-
-function writePendingSignIn(response: http.ServerResponse, address: string, secure: boolean): void {
-  const now = Date.now();
-  for (const [identifier, pending] of pendingSignIns) {
-    if (pending.expiresAt <= now) {
-      pendingSignIns.delete(identifier);
-    }
-  }
-  const identifier = randomBytes(24).toString("base64url");
-  pendingSignIns.set(identifier, { address, expiresAt: now + 5 * 60 * 1000 });
-  response.setHeader("Set-Cookie", [
-    cookieLine("session", "", secure, 0),
-    cookieLine("pending", identifier, secure, 5 * 60)
-  ]);
-}
-
-function readPendingSignIn(request: http.IncomingMessage): string {
-  const identifier = readCookies(request).pending || "";
-  const pending = pendingSignIns.get(identifier);
-  if (!pending || pending.expiresAt <= Date.now()) {
-    pendingSignIns.delete(identifier);
-    return "";
-  }
-  return pending.address;
-}
-
-function attachmentDownloadHeaders(fileName: string, contentType: string, length: number): Record<string, string | number> {
-  const cleanedName = fileName.replace(/[\r\n"]/g, "").slice(0, 120) || "attachment";
-  const imageType = displayedImageType(contentType, cleanedName);
-  if (imageType) {
-    return {
-      "Content-Type": imageType,
-      "Content-Length": length,
-      "Content-Disposition": `inline; filename="${cleanedName}"`,
-      "Cache-Control": "private, no-store",
-      "X-Content-Type-Options": "nosniff"
-    };
-  }
-  return {
-    "Content-Type": "application/octet-stream",
-    "Content-Length": length,
-    "Content-Disposition": `attachment; filename="${cleanedName}"`,
-    "Content-Security-Policy": "default-src 'none'; sandbox",
-    "Cache-Control": "no-store",
-    "X-Content-Type-Options": "nosniff"
-  };
-}
-
-function sendJson(response: http.ServerResponse, statusCode: number, payload: unknown): void {
-  const body = JSON.stringify(payload);
-  response.writeHead(statusCode, {
-    "Content-Type": "application/json; charset=utf-8",
-    "Content-Length": Buffer.byteLength(body),
-    "Cache-Control": "no-store"
-  });
-  response.end(body);
-}
-
-function scheduleProcessRestart(response: http.ServerResponse, requestProcessRestart?: () => void): void {
-  if (!requestProcessRestart) {
-    return;
-  }
-  const restart = () => {
-    setImmediate(() => {
-      requestProcessRestart();
-    });
-  };
-  if (response.writableFinished) {
-    restart();
-    return;
-  }
-  response.once("finish", restart);
-}
-
-function textValue(value: unknown): string {
-  return String(value ?? "");
-}
-
-function limitsFromBody(value: unknown): {
-  maximumMessageBytes?: number;
-  mailboxQuotaBytes?: number;
-  maximumUnauthenticatedConnections?: number;
-  maximumUnauthenticatedMessages?: number;
-} | undefined {
-  if (!value || typeof value !== "object") {
-    return undefined;
-  }
-  const record = value as Record<string, unknown>;
-  const limits: {
-    maximumMessageBytes?: number;
-    mailboxQuotaBytes?: number;
-    maximumUnauthenticatedConnections?: number;
-    maximumUnauthenticatedMessages?: number;
-  } = {};
-  for (const name of ["maximumMessageBytes", "mailboxQuotaBytes", "maximumUnauthenticatedConnections", "maximumUnauthenticatedMessages"] as const) {
-    if (record[name] === undefined || record[name] === "") {
-      continue;
-    }
-    limits[name] = Number(record[name]);
-  }
-  return Object.keys(limits).length ? limits : undefined;
-}
-
-function readOutboundAttachments(value: unknown, maximumBytes: number): OutboundAttachment[] {
-  if (!Array.isArray(value) || !value.length) {
-    return [];
-  }
-  const attachments: OutboundAttachment[] = [];
-  let total = 0;
-  for (const item of value) {
-    if (!item || typeof item !== "object") {
-      throw new HttpError(400, "Attachment is invalid");
-    }
-    const record = item as Record<string, unknown>;
-    const content = Buffer.from(textValue(record.contentEncoded), "base64");
-    total += content.length;
-    if (total > maximumBytes) {
-      throw new HttpError(413, "Attachments are too large");
-    }
-    const fileName = textValue(record.fileName).replace(/[\\/\r\n"]/g, "").slice(0, 120) || "attachment";
-    const contentType = textValue(record.contentType).split(";")[0].trim() || "application/octet-stream";
-    attachments.push({
-      fileName,
-      contentType,
-      content,
-      contentIdentifier: textValue(record.contentIdentifier).replace(/[<>\r\n]/g, "").slice(0, 120)
-    });
-  }
-  return attachments;
-}
-
-function presentName(name: string): string {
-  const trimmed = name.trim();
-  if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
-    return trimmed.slice(1, -1).trim();
-  }
-  if (trimmed.endsWith('"') && !trimmed.slice(0, -1).includes('"')) {
-    return trimmed.slice(0, -1).trim();
-  }
-  return trimmed;
-}
-
-function summary(record: MessageRecord) {
-  return {
-    identifier: record.identifier,
-    folderName: record.folderName,
-    fromName: presentName(record.fromName || ""),
-    fromAddress: record.fromAddress || "",
-    toAddresses: record.toAddresses || [],
-    copyAddresses: record.copyAddresses || [],
-    subject: record.subject || "(no subject)",
-    date: record.date,
-    seen: Boolean(record.seen),
-    answered: Boolean(record.answered),
-    flagged: Boolean(record.flagged),
-    draft: Boolean(record.draft),
-    snippet: record.snippet || createSnippet(record.text || ""),
-    attachmentNames: (record.attachments || [])
-      .filter((attachment) => !attachment.contentIdentifier || !(record.html || "").includes(attachment.contentIdentifier))
-      .map((attachment) => attachment.fileName)
-  };
-}
-
-function requireAccount(context: ServerRequest): PublicAccount {
-  if (!context.account) {
-    throw new HttpError(401, "Sign in required");
-  }
-  return context.account;
-}
-
-function requireAdministrator(context: ServerRequest): PublicAccount {
-  const account = requireAccount(context);
-  if (account.role !== AccountRole.Administrator) {
-    throw new HttpError(403, "Administrator access is required");
-  }
-  return account;
-}
-
 const companyApiPrefixes = [ApiEndpoint.Activity, ApiEndpoint.FailedEmail, ApiEndpoint.Mailboxes, ApiEndpoint.AddressRoutes, ApiEndpoint.Settings, ApiEndpoint.Certificate, ApiEndpoint.Backup];
 
 function companyApiPath(pathName: string): boolean {
@@ -383,6 +176,8 @@ export function createWebServer(dependencies: {
   settingsRepository: SettingsRepository;
   readCertificate(): Promise<CertificateDescription>;
   replaceCertificate(certificatePem: string, privateKeyPem: string, intermediateCertificatesPem?: string): Promise<CertificateDescription>;
+  issueAcmeCertificate?: () => Promise<CertificateDescription>;
+  renewAcmeCertificate?: () => Promise<CertificateDescription>;
   requestProcessRestart?: () => void;
 }): http.Server | https.Server {
   const addressRouteRepository = new AddressRouteRepository(dependencies.configuration.storageDirectory);
@@ -529,7 +324,7 @@ export function createWebServer(dependencies: {
         throw new HttpError(401, "That authenticator code is wrong");
       }
       dependencies.signInGuard.recordSuccess(key);
-      pendingSignIns.delete(readCookies(request).pending || "");
+      clearPendingSignIn(request);
       const account = await dependencies.accountRepository.findAccount(address);
       if (!account) {
         throw new HttpError(401, "Sign in again");
@@ -880,7 +675,13 @@ export function createWebServer(dependencies: {
 
     if (request.method === "GET" && pathName === ApiEndpoint.Certificate) {
       requireAdministrator(context);
-      sendJson(response, 200, { certificate: await dependencies.readCertificate() });
+      const settings = await dependencies.settingsRepository.read();
+      const company = await dependencies.organizationRepository.read();
+      sendJson(response, 200, {
+        certificate: await dependencies.readCertificate(),
+        acmeHostname: settings.publicHostname || company?.domain || "",
+        administratorEmail: company?.administratorAddress || ""
+      });
       return true;
     }
 
@@ -905,6 +706,72 @@ export function createWebServer(dependencies: {
       });
       sendJson(response, 200, { certificate });
       return true;
+    }
+
+    if (request.method === "POST" && pathName === ApiEndpoint.CertificateAcmeIssue) {
+      requireAdministrator(context);
+      if (!dependencies.issueAcmeCertificate) {
+        throw new HttpError(503, "Let’s Encrypt is not available on this server");
+      }
+      try {
+        const certificate = await dependencies.issueAcmeCertificate();
+        const settings = await dependencies.settingsRepository.read();
+        const company = await dependencies.organizationRepository.read();
+        await dependencies.activityLogger.record({
+          protocol: MailProtocol.Web,
+          action: ActivityAction.Account,
+          remoteAddress: request.socket.remoteAddress || "",
+          mailboxAddress: context.account?.address || "",
+          senderAddress: "",
+          recipientAddresses: [],
+          subject: "",
+          byteCount: 0,
+          result: ActivityResult.Accepted,
+          detail: "lets encrypt certificate issued"
+        });
+        sendJson(response, 200, {
+          certificate,
+          acmeHostname: settings.publicHostname || company?.domain || "",
+          administratorEmail: company?.administratorAddress || ""
+        });
+        return true;
+      } catch (error) {
+        const statusCode = (error as { statusCode?: number }).statusCode || 400;
+        throw new HttpError(statusCode, (error as Error).message || "Let’s Encrypt could not issue the certificate");
+      }
+    }
+
+    if (request.method === "POST" && pathName === ApiEndpoint.CertificateAcmeRenew) {
+      requireAdministrator(context);
+      if (!dependencies.renewAcmeCertificate) {
+        throw new HttpError(503, "Let’s Encrypt is not available on this server");
+      }
+      try {
+        const certificate = await dependencies.renewAcmeCertificate();
+        const settings = await dependencies.settingsRepository.read();
+        const company = await dependencies.organizationRepository.read();
+        await dependencies.activityLogger.record({
+          protocol: MailProtocol.Web,
+          action: ActivityAction.Account,
+          remoteAddress: request.socket.remoteAddress || "",
+          mailboxAddress: context.account?.address || "",
+          senderAddress: "",
+          recipientAddresses: [],
+          subject: "",
+          byteCount: 0,
+          result: ActivityResult.Accepted,
+          detail: "lets encrypt certificate renewed"
+        });
+        sendJson(response, 200, {
+          certificate,
+          acmeHostname: settings.publicHostname || company?.domain || "",
+          administratorEmail: company?.administratorAddress || ""
+        });
+        return true;
+      } catch (error) {
+        const statusCode = (error as { statusCode?: number }).statusCode || 400;
+        throw new HttpError(statusCode, (error as Error).message || "Let’s Encrypt could not renew the certificate");
+      }
     }
 
     if (!personalApiPath(pathName)) {

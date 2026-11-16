@@ -23,6 +23,8 @@ export enum ApiEndpoint {
   MailboxAccess = "/api/admin/mailboxes/access",
   Settings = "/api/admin/settings",
   Certificate = "/api/admin/certificate",
+  CertificateAcmeIssue = "/api/admin/certificate/acme/issue",
+  CertificateAcmeRenew = "/api/admin/certificate/acme/renew",
   MailClientSettings = "/api/mail-client-settings",
   AccountPassword = "/api/account/password",
   MailboxEvents = "/api/mailbox-events",

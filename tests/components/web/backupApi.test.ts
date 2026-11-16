@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, it } from "node:test";
 import { endRestore, tryBeginRestore } from "../../../src/components/backup/index.js";
@@ -23,10 +23,12 @@ describe("backup admin api", () => {
         password: "correct-horse"
       });
       assert.equal(setup.status, 201);
-      await writeFile(path.join(consoleServer.storageDirectory, "storage-key"), Buffer.alloc(32, 3));
+      const liveKey = Buffer.alloc(32, 3);
+      await writeFile(path.join(consoleServer.storageDirectory, "storage-key"), liveKey);
       const created = await requestJson(consoleServer.baseUrl, "POST", "/api/admin/backup", undefined, setup.cookieHeader);
       assert.equal(created.status, 201);
       const backupName = String(created.payload.backupName);
+      await assert.rejects(() => access(path.join(consoleServer.storageDirectory, "backups", backupName, "storage-key")));
       await writeFile(path.join(consoleServer.storageDirectory, "backups", "notes.txt"), Buffer.from("skip"));
       await mkdir(path.join(consoleServer.storageDirectory, "backups", "not-a-stamp"), { recursive: true });
       const listed = await requestJson(consoleServer.baseUrl, "GET", "/api/admin/backup", undefined, setup.cookieHeader);
@@ -85,6 +87,7 @@ describe("backup admin api", () => {
       );
       assert.equal(restored.status, 200);
       assert.equal(restored.payload.restarting, true);
+      assert.deepEqual(await readFile(path.join(consoleServer.storageDirectory, "storage-key")), liveKey);
       await new Promise((resolve) => setTimeout(resolve, 50));
       assert.equal(restartRequested, 1);
     } finally {

@@ -14,6 +14,8 @@ The install notes are in [docs/install-open-mail-server/SKILL.md](docs/install-o
 
 Use an account that can administer that server. The password is only used for that SSH connection.
 
+To move one user's existing email into that mailbox, the notes are in [docs/migrate-email/SKILL.md](docs/migrate-email/SKILL.md). Open this repository with your AI tool and ask it to migrate a mailbox. It supports a backup file (Gmail/M365 `.mbox` export, Outlook `.pst`/`.ost`, or a zip of `.eml`) or reading directly from another server over IMAP or POP3. It migrates one user into their own mailbox only.
+
 ### Docker Compose
 
 This repository already includes `docker-compose.yml`. `NET_BIND_SERVICE` lets the container listen on the mail ports without running as root.
@@ -33,6 +35,7 @@ services:
       - "993:993"
       - "110:110"
       - "995:995"
+      - "80:80"
       - "443:443"
     volumes:
       - ./data:/opt/email-server/data
@@ -48,7 +51,7 @@ Compose downloads the published image. It does not build one on your server.
 
 Your mail is stored in `./data` on the host. Inside the container that folder is `/opt/email-server/data`. Keep `data/storage-key` with it. That file is 32 bytes, and the stored mail can only be opened when it is there.
 
-Open `https://your-server` in a browser. The certificate is self-signed, so the browser will warn you. Continue past that warning. The first page creates the company and the administrator account. Enter the company domain, this server's public IP address, and the administrator's email. The DNS guide and the port check use that address, and DMARC reports are sent to that email.
+Complete first-run setup from the server itself (or another loopback client) at `https://127.0.0.1`. Remote browsers cannot create the company until an administrator already exists. The certificate is self-signed, so the browser will warn you — continue past that warning. The first page creates the company and the administrator account. Enter the company domain, this server's public IP address, and the administrator's email. The DNS guide and the port check use that address, and DMARC reports are sent to that email. After setup, open `https://your-server` to sign in.
 
 ## Connect a mail app
 
@@ -93,7 +96,7 @@ Many internet providers block outgoing mail. Ask yours to allow it, or send thro
 
 ### The browser says the site is not secure
 
-The server starts with a self-signed certificate. Buy one from a certificate provider such as SSLs.com or Comodo. In the web console, open **Settings**, then **Certificate**, then **Upload certificate**. Upload the certificate and the private key. If the provider sent the intermediate certificates as a separate file, upload that too.
+The server starts with a self-signed certificate. In the web console, open **Settings**, then **Certificate**. You can **Get Let’s Encrypt certificate** when this server has a public DNS name and port **80** is reachable from the internet (Compose publishes `80:80` for that check). Or choose **Upload certificate** and provide PEM files from a certificate provider such as SSLs.com or Comodo. If the provider sent the intermediate certificates as a separate file, upload that too.
 
 ### I found a bug
 

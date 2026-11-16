@@ -19,6 +19,8 @@ describe("api endpoints", () => {
     assert.equal(ApiEndpoint.MailboxAccess, "/api/admin/mailboxes/access");
     assert.equal(ApiEndpoint.Settings, "/api/admin/settings");
     assert.equal(ApiEndpoint.Certificate, "/api/admin/certificate");
+    assert.equal(ApiEndpoint.CertificateAcmeIssue, "/api/admin/certificate/acme/issue");
+    assert.equal(ApiEndpoint.CertificateAcmeRenew, "/api/admin/certificate/acme/renew");
     assert.equal(ApiEndpoint.Backup, "/api/admin/backup");
     assert.equal(ApiEndpoint.BackupRestore, "/api/admin/backup/restore");
     assert.equal(ApiEndpoint.MailClientSettings, "/api/mail-client-settings");

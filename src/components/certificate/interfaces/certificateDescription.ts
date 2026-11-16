@@ -8,4 +8,5 @@ export interface CertificateDescription {
   intermediateCount: number;
   daysRemaining: number;
   renewalRequired: boolean;
+  acmeManaged: boolean;
 }
