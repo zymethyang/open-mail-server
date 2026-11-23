@@ -3,6 +3,8 @@ import type { Configuration } from "../configuration/index.js";
 import { configurationWithListeners, loadConfiguration } from "../configuration/index.js";
 import type { MailExchange, MailExchangeResolver } from "../mailExchange/interfaces/mailExchange.js";
 import { DnsMailExchangeResolver } from "../mailExchange/index.js";
+import type { MailAuthenticationLookup } from "../mailAuthentication/interfaces/mailAuthenticationLookup.js";
+import { dnsMailAuthenticationLookup } from "../mailAuthentication/dnsLookup.js";
 import { openSecureStorage } from "../secureStorage/index.js";
 import { SettingsRepository } from "../settings/index.js";
 import type { ListenerStatus } from "../web/interfaces/listenerStatus.js";
@@ -16,10 +18,12 @@ export type { RunningEmailServer };
 export async function startEmailServer(options?: {
   configuration?: Configuration;
   mailExchangeResolver?: MailExchangeResolver;
+  mailAuthenticationLookup?: MailAuthenticationLookup;
 }): Promise<RunningEmailServer> {
   const configuration = await resolveConfiguration(options);
   await ensureMailCertificate(configuration);
   const mailExchangeResolver = options?.mailExchangeResolver || new DnsMailExchangeResolver();
+  const mailAuthenticationLookup = options?.mailAuthenticationLookup || dnsMailAuthenticationLookup();
   const listeners: ListenerStatus[] = [];
   const workers = new Map<ServiceName, Worker>();
   const runningWorkers = new Set<Worker>();
@@ -98,6 +102,51 @@ export async function startEmailServer(options?: {
     if (message.kind === WorkerMessageKind.ResolveMailExchange && message.requestId && message.domain) {
       void mailExchangeResolver.resolve(message.domain).then(
         (records: MailExchange[]) => {
+          if (workers.get(service) === worker) {
+            worker.postMessage({ kind: WorkerMessageKind.ParentResponse, requestId: message.requestId, records });
+          }
+        },
+        (error: Error) => {
+          if (workers.get(service) === worker) {
+            worker.postMessage({ kind: WorkerMessageKind.ParentResponse, requestId: message.requestId, error: error.message });
+          }
+        }
+      );
+      return;
+    }
+    if (message.kind === WorkerMessageKind.ResolveAuthText && message.requestId && message.name) {
+      void mailAuthenticationLookup.resolveText(message.name).then(
+        (records: string[]) => {
+          if (workers.get(service) === worker) {
+            worker.postMessage({ kind: WorkerMessageKind.ParentResponse, requestId: message.requestId, records });
+          }
+        },
+        (error: Error) => {
+          if (workers.get(service) === worker) {
+            worker.postMessage({ kind: WorkerMessageKind.ParentResponse, requestId: message.requestId, error: error.message });
+          }
+        }
+      );
+      return;
+    }
+    if (message.kind === WorkerMessageKind.ResolveAuthAddresses && message.requestId && message.name) {
+      void mailAuthenticationLookup.resolveAddresses(message.name).then(
+        (records: string[]) => {
+          if (workers.get(service) === worker) {
+            worker.postMessage({ kind: WorkerMessageKind.ParentResponse, requestId: message.requestId, records });
+          }
+        },
+        (error: Error) => {
+          if (workers.get(service) === worker) {
+            worker.postMessage({ kind: WorkerMessageKind.ParentResponse, requestId: message.requestId, error: error.message });
+          }
+        }
+      );
+      return;
+    }
+    if (message.kind === WorkerMessageKind.ResolveAuthMx && message.requestId && message.name) {
+      void mailAuthenticationLookup.resolveMailExchanges(message.name).then(
+        (records: string[]) => {
           if (workers.get(service) === worker) {
             worker.postMessage({ kind: WorkerMessageKind.ParentResponse, requestId: message.requestId, records });
           }

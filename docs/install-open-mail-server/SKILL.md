@@ -26,7 +26,7 @@ The remote account must be able to run sudo, unless it is already root.
 
 1. Connect to the server with SSH.
 2. If `docker compose version` fails, install Docker Engine and the Compose plugin, then start Docker.
-3. Copy this project to `~/email-server` on the server. Leave out `data`, `node_modules`, `dist`, and `.git`, so an existing mail store stays in place. The copy includes `docker-compose.yml`, the Dockerfile, and the source.
+3. Copy this project to `~/open-mail-server` on the server. Leave out `data`, `node_modules`, `dist`, and `.git`, so an existing mail store stays in place. The copy includes `docker-compose.yml`, the Dockerfile, and the source.
 4. On the server, from that directory, create `data` and give it to user id 1000. That is the account inside the container.
 5. Run `docker compose up -d --build`.
 6. When a firewall is active, allow TCP ports 25, 465, 587, 143, 993, 110, 995, 80, and 443. Port 80 is required for Let’s Encrypt HTTP-01.

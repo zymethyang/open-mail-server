@@ -4,7 +4,7 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /opt/email-server
+WORKDIR /opt/open-mail-server
 
 COPY package.json package-lock.json tsconfig.json tsconfig.web.json ./
 COPY src ./src
@@ -13,10 +13,10 @@ RUN npm ci \
   && npx tsc \
   && npx tsc -p tsconfig.web.json \
   && npm prune --omit=dev \
-  && mkdir -p /opt/email-server/data \
-  && chown -R node:node /opt/email-server /opt/email-server/data
+  && mkdir -p /opt/open-mail-server/data \
+  && chown -R node:node /opt/open-mail-server /opt/open-mail-server/data
 
-VOLUME ["/opt/email-server/data"]
+VOLUME ["/opt/open-mail-server/data"]
 
 EXPOSE 25 80 443 465 587 143 993 110 995
 

@@ -22,7 +22,7 @@ This repository already includes `docker-compose.yml`. `NET_BIND_SERVICE` lets t
 
 ```yaml
 services:
-  email-server:
+  open-mail-server:
     image: zymethyang/open-mail-server:v1.3.0
     restart: unless-stopped
     cap_add:
@@ -38,7 +38,7 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./data:/opt/email-server/data
+      - ./data:/opt/open-mail-server/data
 ```
 
 From that directory, run:
@@ -49,7 +49,7 @@ docker compose up -d
 
 Compose downloads the published image. It does not build one on your server.
 
-Your mail is stored in `./data` on the host. Inside the container that folder is `/opt/email-server/data`. Keep `data/storage-key` with it. That file is 32 bytes, and the stored mail can only be opened when it is there.
+Your mail is stored in `./data` on the host. Inside the container that folder is `/opt/open-mail-server/data`. Keep `data/storage-key` with it. That file is 32 bytes, and the stored mail can only be opened when it is there.
 
 Complete first-run setup from the server itself (or another loopback client) at `https://127.0.0.1`. Remote browsers cannot create the company until an administrator already exists. The certificate is self-signed, so the browser will warn you — continue past that warning. The first page creates the company and the administrator account. Enter the company domain, this server's public IP address, and the administrator's email. The DNS guide and the port check use that address, and DMARC reports are sent to that email. After setup, open `https://your-server` to sign in.
 
@@ -100,7 +100,7 @@ The server starts with a self-signed certificate. In the web console, open **Set
 
 ### I found a bug
 
-Open a ticket in [GitHub Issues](https://github.com/tringuyen/email-server/issues).
+Open a ticket in [GitHub Issues](https://github.com/zymethyang/open-mail-server/issues).
 
 ## License
 

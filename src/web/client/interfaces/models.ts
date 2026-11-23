@@ -38,6 +38,7 @@ export interface Bootstrap {
   needsSetup?: boolean;
   configuredDomain?: string;
   account: SessionAccount | null;
+  csrfToken?: string;
   organization?: OrganizationProfile;
   hosting?: HostingInformation;
 }

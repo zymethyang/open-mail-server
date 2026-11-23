@@ -17,8 +17,8 @@ import { projectDirectoryFrom } from "../../../src/components/configuration/util
 describe("configuration logic", () => {
   it("finds the project directory and rejects a path outside a project", async () => {
     const projectDirectory = projectDirectoryFrom(import.meta.url);
-    assert.equal(path.basename(projectDirectory), "email-server");
-    const outside = await mkdtemp(path.join(os.tmpdir(), "email-server-outside-"));
+    assert.equal(path.basename(projectDirectory), "open-mail-server");
+    const outside = await mkdtemp(path.join(os.tmpdir(), "open-mail-server-outside-"));
     assert.throws(() => projectDirectoryFrom(pathToFileURL(path.join(outside, "file.ts")).href), /project directory/);
   });
 

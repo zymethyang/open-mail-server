@@ -4,6 +4,7 @@ import path from "node:path";
 import { after, before, describe, it } from "node:test";
 import { startEmailServer } from "../../../src/components/emailServer/index.js";
 import type { RunningEmailServer } from "../../../src/components/emailServer/interfaces/runningEmailServer.js";
+import { emptyMailAuthenticationLookup } from "../../../src/components/mailAuthentication/dnsLookup.js";
 import { connectPlain, connectTrustedTls, readResponse, upgradeToTrustedTls } from "../../support/protocolClient.js";
 import { createTemporaryStorage, removeTemporaryStorage } from "../../support/temporaryStorage.js";
 import { testConfiguration } from "../../support/testConfiguration.js";
@@ -22,7 +23,7 @@ describe("mobile mail clients", { concurrency: 1 }, () => {
 
   before(async () => {
     storageDirectory = await createTemporaryStorage();
-    running = await startEmailServer({ configuration: testConfiguration(storageDirectory) });
+    running = await startEmailServer({ configuration: testConfiguration(storageDirectory), mailAuthenticationLookup: emptyMailAuthenticationLookup() });
     certificate = await readFile(path.join(storageDirectory, "certificates", "certificate.pem"), "utf8");
     const setup = await fetch(`http://127.0.0.1:${listenerPort(server(), "Web", "HTTP")}/api/setup`, {
       method: "POST",

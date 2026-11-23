@@ -16,6 +16,7 @@ import {
 import { applyCertificate, followCertificateReplacement, publishCertificateReplacement } from "../certificate/certificateBroadcast.js";
 import { ServerPort } from "../configuration/enums/serverPort.js";
 import type { MailExchange } from "../mailExchange/interfaces/mailExchange.js";
+import type { MailAuthenticationLookup } from "../mailAuthentication/interfaces/mailAuthenticationLookup.js";
 import type { MailRuntime } from "./interfaces/mailRuntime.js";
 import { createMailRuntime } from "./mailRuntime.js";
 import { ServiceName } from "./enums/serviceName.js";
@@ -297,7 +298,18 @@ try {
       resolve(domain: string) {
         return askParent<MailExchange[]>({ kind: WorkerMessageKind.ResolveMailExchange, domain });
       }
-    }
+    },
+    mailAuthenticationLookup: {
+      resolveText(name: string) {
+        return askParent<string[]>({ kind: WorkerMessageKind.ResolveAuthText, name });
+      },
+      resolveAddresses(name: string) {
+        return askParent<string[]>({ kind: WorkerMessageKind.ResolveAuthAddresses, name });
+      },
+      resolveMailExchanges(name: string) {
+        return askParent<string[]>({ kind: WorkerMessageKind.ResolveAuthMx, name });
+      }
+    } satisfies MailAuthenticationLookup
   });
   followCertificateReplacement(runtime.configuration.storageDirectory, runtime.certificate, () => servers);
   await startService(runtime);

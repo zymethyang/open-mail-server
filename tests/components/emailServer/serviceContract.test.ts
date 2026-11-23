@@ -23,6 +23,9 @@ describe("release contracts", () => {
     const kinds = Object.values(WorkerMessageKind);
     assert.deepEqual(kinds, [
       WorkerMessageKind.ResolveMailExchange,
+      WorkerMessageKind.ResolveAuthText,
+      WorkerMessageKind.ResolveAuthAddresses,
+      WorkerMessageKind.ResolveAuthMx,
       WorkerMessageKind.ParentResponse,
       WorkerMessageKind.Listening,
       WorkerMessageKind.Listeners,

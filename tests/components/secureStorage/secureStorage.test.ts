@@ -57,7 +57,7 @@ describe("secure storage interface", { concurrency: 1 }, () => {
   });
 
   it("rejects a storage key file that is not 32 bytes and then accepts the test key", async () => {
-    const storageDirectory = await mkdtemp(path.join(os.tmpdir(), "email-server-key-"));
+    const storageDirectory = await mkdtemp(path.join(os.tmpdir(), "open-mail-server-key-"));
     await writeFile(path.join(storageDirectory, "storage-key"), Buffer.from("short"));
     try {
       await assert.rejects(() => openSecureStorage(storageDirectory), /32 bytes/);
@@ -69,7 +69,7 @@ describe("secure storage interface", { concurrency: 1 }, () => {
   });
 
   it("does not create a new key when sealed mail is already stored", async () => {
-    const storageDirectory = await mkdtemp(path.join(os.tmpdir(), "email-server-sealed-"));
+    const storageDirectory = await mkdtemp(path.join(os.tmpdir(), "open-mail-server-sealed-"));
     await writeFile(
       path.join(storageDirectory, "accounts.json"),
       `${JSON.stringify({ sealed: true, nonce: "a", ciphertext: "b" })}\n`,

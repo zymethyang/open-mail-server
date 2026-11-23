@@ -41,6 +41,44 @@ export interface RunningWebConsole {
   stop(): Promise<void>;
 }
 
+const SUPPRESS_CSRF_AUTO_THREAD = "__suppress_csrf_auto_thread__";
+
+interface CapturedSession {
+  csrfToken: string;
+}
+
+const capturedSessions = new Map<string, CapturedSession>();
+
+export function resetHarnessCsrfToken(): void {
+  capturedSessions.clear();
+}
+
+export function suppressCsrfAutoThread(): Record<string, string> {
+  return { "X-CSRF-Token": SUPPRESS_CSRF_AUTO_THREAD };
+}
+
+function cookieValue(header: string): string {
+  for (const part of header.split(";")) {
+    const trimmed = part.trim();
+    if (trimmed.startsWith("session=")) {
+      return trimmed.slice("session=".length);
+    }
+  }
+  return "";
+}
+
+function captureSession(setCookieHeader: string[], csrfToken: string): void {
+  for (const line of setCookieHeader) {
+    const part = line.split(";")[0].trim();
+    if (part.startsWith("session=")) {
+      const value = part.slice("session=".length);
+      if (value) {
+        capturedSessions.set(value, { csrfToken });
+      }
+    }
+  }
+}
+
 export function cookieHeader(lines: string[]): string {
   return lines
     .map((line) => line.split(";")[0].trim())
@@ -66,6 +104,18 @@ export async function requestJson(
   if (cookieHeaderValue) {
     headers.Cookie = cookieHeaderValue;
   }
+  const suppress = headers["X-CSRF-Token"] === SUPPRESS_CSRF_AUTO_THREAD;
+  if (suppress) {
+    delete headers["X-CSRF-Token"];
+  }
+  const upperMethod = method.toUpperCase();
+  if (!suppress && !headers["X-CSRF-Token"] && upperMethod !== "GET" && upperMethod !== "HEAD") {
+    const value = cookieValue(cookieHeaderValue);
+    const token = value ? capturedSessions.get(value)?.csrfToken : undefined;
+    if (token) {
+      headers["X-CSRF-Token"] = token;
+    }
+  }
   const response = await fetch(`${baseUrl}${pathName}`, {
     method,
     headers,
@@ -74,6 +124,16 @@ export async function requestJson(
   const text = await response.text();
   const payload = text ? (JSON.parse(text) as Record<string, unknown>) : {};
   const lines = typeof response.headers.getSetCookie === "function" ? response.headers.getSetCookie() : [];
+  if (typeof payload.csrfToken === "string" && payload.csrfToken) {
+    if (lines.length > 0) {
+      captureSession(lines, payload.csrfToken);
+    } else if (cookieHeaderValue) {
+      const value = cookieValue(cookieHeaderValue);
+      if (value) {
+        capturedSessions.set(value, { csrfToken: payload.csrfToken });
+      }
+    }
+  }
   return { status: response.status, payload, cookieHeader: cookieHeader(lines) };
 }
 
@@ -188,6 +248,7 @@ export async function startWebConsole(options: {
       await closeServer(server);
       await sink.stop();
       await removeTemporaryStorage(storageDirectory);
+      resetHarnessCsrfToken();
     }
   };
 }

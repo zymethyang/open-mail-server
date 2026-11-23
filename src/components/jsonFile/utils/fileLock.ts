@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 const tails = new Map<string, Promise<void>>();
-const lockDirectory = path.join(os.tmpdir(), "email-server-file-locks");
+const lockDirectory = path.join(os.tmpdir(), "open-mail-server-file-locks");
 const staleLockMilliseconds = 15_000;
 const refreshLockMilliseconds = 5_000;
 

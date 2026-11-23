@@ -129,7 +129,7 @@ export class ConsoleBrowser {
   }
 
   static async open(): Promise<ConsoleBrowser> {
-    const profileDirectory = await mkdtemp(path.join(os.tmpdir(), "email-server-browser-"));
+    const profileDirectory = await mkdtemp(path.join(os.tmpdir(), "open-mail-server-browser-"));
     const port = await availablePort();
     const chromeProcess = spawn(
       chromeExecutable(),
@@ -225,7 +225,7 @@ export class ConsoleBrowser {
 
   async readPostStatus(pathName: string, body = "{}"): Promise<number> {
     const status = await this.evaluate(
-      `fetch(${JSON.stringify(pathName)}, { method: "POST", headers: { "Content-Type": "application/json" }, body: ${JSON.stringify(body)}, credentials: "same-origin" }).then((response) => response.status)`,
+      `fetch(${JSON.stringify(pathName)}, { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": window.__csrfToken || "" }, body: ${JSON.stringify(body)}, credentials: "same-origin" }).then((response) => response.status)`,
       true
     );
     if (typeof status !== "number") {

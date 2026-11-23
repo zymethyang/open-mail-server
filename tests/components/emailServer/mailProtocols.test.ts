@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import { startEmailServer } from "../../../src/components/emailServer/index.js";
 import type { RunningEmailServer } from "../../../src/components/emailServer/interfaces/runningEmailServer.js";
+import { emptyMailAuthenticationLookup } from "../../../src/components/mailAuthentication/dnsLookup.js";
 import { connectPlain, connectTls, readResponse } from "../../support/protocolClient.js";
 import { startSmtpSink, type SmtpSink } from "../../support/smtpSink.js";
 import { createTemporaryStorage, removeTemporaryStorage } from "../../support/temporaryStorage.js";
@@ -12,6 +13,7 @@ describe("mail protocol flow", { concurrency: 1 }, () => {
   let running: RunningEmailServer | undefined;
   let storageDirectory = "";
   let administratorCookie = "";
+  let administratorCsrfToken = "";
 
   function server(): RunningEmailServer {
     if (!running) {
@@ -33,7 +35,8 @@ describe("mail protocol flow", { concurrency: 1 }, () => {
         async resolve() {
           return [{ host: "127.0.0.1", port: sinkPort, trustedCertificate }];
         }
-      }
+      },
+      mailAuthenticationLookup: emptyMailAuthenticationLookup()
     });
     if (!running) {
       throw new Error("The mail server did not start");
@@ -53,6 +56,8 @@ describe("mail protocol flow", { concurrency: 1 }, () => {
     assert.equal(setup.status, 201);
     administratorCookie = (setup.headers.getSetCookie?.() || []).map((line) => line.split(";")[0]).find((line) => line.startsWith("session=")) || "";
     assert.match(administratorCookie, /^session=/);
+    const setupBody = (await setup.json()) as { csrfToken?: string };
+    administratorCsrfToken = setupBody.csrfToken || "";
   });
 
   after(async () => {
@@ -297,7 +302,7 @@ describe("mail protocol flow", { concurrency: 1 }, () => {
   it("refuses a signed-in mailbox that sends as another mailbox", async () => {
     const created = await fetch(`http://127.0.0.1:${listenerPort(server(), "Web", "HTTP")}/api/admin/mailboxes`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Cookie: administratorCookie },
+      headers: { "Content-Type": "application/json", Cookie: administratorCookie, "X-CSRF-Token": administratorCsrfToken },
       body: JSON.stringify({ address: "bea@acme.test", displayName: "Bea Member", password: "member-horse" })
     });
     assert.equal(created.status, 201);

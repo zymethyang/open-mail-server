@@ -4,7 +4,7 @@ import type { SignInFailureRecord, SignInNotice } from "./interfaces/signInNotic
 
 export class SignInGuard implements SignInGuardContract {
   private readonly failures = new Map<string, SignInFailureRecord>();
-  private readonly channel = new BroadcastChannel("email-server-sign-in");
+  private readonly channel = new BroadcastChannel("open-mail-server-sign-in");
 
   constructor() {
     (this.channel as BroadcastChannel & { unref(): void }).unref();

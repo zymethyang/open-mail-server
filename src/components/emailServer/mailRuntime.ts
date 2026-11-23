@@ -2,6 +2,7 @@ import os from "node:os";
 import type { Configuration } from "../configuration/index.js";
 import { DeliveryService } from "../delivery/index.js";
 import { dnsMailAuthenticationLookup } from "../mailAuthentication/dnsLookup.js";
+import type { MailAuthenticationLookup } from "../mailAuthentication/interfaces/mailAuthenticationLookup.js";
 import type { MailExchangeResolver } from "../mailExchange/interfaces/mailExchange.js";
 import { MailboxEvents } from "../mailboxEvents/index.js";
 import { ensureSelfSignedCertificate, type ServerCertificate } from "../certificate/index.js";
@@ -46,6 +47,7 @@ export async function ensureMailCertificate(configuration: Configuration): Promi
 export async function createMailRuntime(input: {
   configuration: Configuration;
   mailExchangeResolver: MailExchangeResolver;
+  mailAuthenticationLookup?: MailAuthenticationLookup;
 }): Promise<MailRuntime> {
   const configuration = input.configuration;
   await openSecureStorage(configuration.storageDirectory);
@@ -81,7 +83,7 @@ export async function createMailRuntime(input: {
     readRelay: () => settingsRepository.read().then((settings) => settings.relay),
     maximumMessageBytes: configuration.maximumMessageBytes,
     signOutgoingMessage: createOutgoingSigner(configuration.storageDirectory, signingDomain),
-    mailAuthenticationLookup: dnsMailAuthenticationLookup()
+    mailAuthenticationLookup: input.mailAuthenticationLookup ?? dnsMailAuthenticationLookup()
   });
   return {
     configuration,

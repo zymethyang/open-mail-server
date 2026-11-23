@@ -36,16 +36,17 @@ describe("certificate authority chain", { concurrency: 1 }, () => {
     });
     assert.equal(setup.status, 201);
     const cookie = sessionCookie(setup);
+    const csrfToken = ((await setup.clone().json()) as { csrfToken?: string }).csrfToken || "";
     const baseUrl = `http://127.0.0.1:${listenerPort(server(), "Web", "HTTP")}`;
     const missingIntermediate = await fetch(`${baseUrl}/api/admin/certificate`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Cookie: cookie },
+      headers: { "Content-Type": "application/json", Cookie: cookie, "X-CSRF-Token": csrfToken },
       body: JSON.stringify({ certificate: issued.certificate, privateKey: issued.privateKey })
     });
     assert.equal(missingIntermediate.status, 400);
     const uploaded = await fetch(`${baseUrl}/api/admin/certificate`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Cookie: cookie },
+      headers: { "Content-Type": "application/json", Cookie: cookie, "X-CSRF-Token": csrfToken },
       body: JSON.stringify({
         certificate: issued.certificate,
         privateKey: issued.privateKey,

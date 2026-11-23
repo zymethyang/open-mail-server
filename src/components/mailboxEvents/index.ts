@@ -3,7 +3,7 @@ import type { MailboxNotice } from "./interfaces/mailboxNotice.js";
 
 export class MailboxEvents implements MailboxEventsContract {
   private readonly listeners = new Set<(change: MailboxChange) => void>();
-  private readonly channel = new BroadcastChannel("email-server-mailbox");
+  private readonly channel = new BroadcastChannel("open-mail-server-mailbox");
 
   constructor() {
     (this.channel as BroadcastChannel & { unref(): void }).unref();

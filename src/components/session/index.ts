@@ -27,13 +27,15 @@ function createSessionRepository(storageDirectory: string): SessionRepositoryCon
       return withLock("sessions", async () => {
         const sessions = await readSessions();
         const identifier = randomBytes(24).toString("hex");
+        const csrfToken = randomBytes(32).toString("hex");
         sessions[identifier] = {
           address,
           role,
-          expiresAt: Date.now() + lifetimeMilliseconds
+          expiresAt: Date.now() + lifetimeMilliseconds,
+          csrfToken
         };
         await writeJson(filePath, { sessions });
-        return identifier;
+        return { identifier, csrfToken };
       });
     },
 

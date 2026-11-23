@@ -15,6 +15,7 @@ export interface WorkerMessage {
   detail?: string;
   requestId?: number;
   domain?: string;
+  name?: string;
   records?: unknown;
   error?: string;
 }

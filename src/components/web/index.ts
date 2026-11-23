@@ -62,7 +62,9 @@ import {
   readOutboundAttachments,
   summary,
   requireAccount,
-  requireAdministrator
+  requireAdministrator,
+  requireCsrfToken,
+  requestIsMutating
 } from "./routes/shared.js";
 import { authenticatorImage, createOneTimePasswordSecret, oneTimePasswordUri } from "../oneTimePassword/index.js";
 export type { ListenerStatus };
@@ -227,6 +229,7 @@ export function createWebServer(dependencies: {
         configuredDomain: dependencies.configuration.configuredDomain,
         organization: publicOrganization,
         account: context.account,
+        csrfToken: context.account ? (context.session?.csrfToken || "") : "",
         listeners: isAdministrator ? dependencies.listenerStatus : [],
         hosting: organization && isAdministrator ? await hostingGuide(organization) : null
       });
@@ -254,7 +257,7 @@ export function createWebServer(dependencies: {
           domain: created.domain
         });
         await dependencies.messageRepository.ensureMailbox(account.address);
-        const identifier = await dependencies.sessionRepository.create(account.address, account.role);
+        const { identifier, csrfToken } = await dependencies.sessionRepository.create(account.address, account.role);
         writeSessionCookie(response, identifier, connectionIsSecure(request));
         try {
           const hosting = await hostingGuide(created);
@@ -264,7 +267,7 @@ export function createWebServer(dependencies: {
         } catch (error) {
           console.error((error as Error).message);
         }
-        sendJson(response, 201, { organization: created, account });
+        sendJson(response, 201, { organization: created, account, csrfToken });
       } catch (error) {
         await dependencies.organizationRepository.remove();
         throw error;
@@ -302,9 +305,9 @@ export function createWebServer(dependencies: {
         sendJson(response, 200, { oneTimePasswordRequired: true });
         return true;
       }
-      const identifier = await dependencies.sessionRepository.create(account.address, account.role);
+      const { identifier, csrfToken } = await dependencies.sessionRepository.create(account.address, account.role);
       writeSessionCookie(response, identifier, connectionIsSecure(request));
-      sendJson(response, 200, { account, organization });
+      sendJson(response, 200, { account, organization, csrfToken });
       return true;
     }
 
@@ -329,9 +332,9 @@ export function createWebServer(dependencies: {
       if (!account) {
         throw new HttpError(401, "Sign in again");
       }
-      const identifier = await dependencies.sessionRepository.create(account.address, account.role);
+      const { identifier, csrfToken } = await dependencies.sessionRepository.create(account.address, account.role);
       writeSessionCookie(response, identifier, connectionIsSecure(request));
-      sendJson(response, 200, { account, organization });
+      sendJson(response, 200, { account, organization, csrfToken });
       return true;
     }
 
@@ -349,10 +352,16 @@ export function createWebServer(dependencies: {
 
     if (companyApiPath(pathName)) {
       requireAdministrator(context);
+      if (requestIsMutating(context.request)) {
+        requireCsrfToken(context);
+      }
     }
 
     if (request.method === "GET" && pathName === ApiEndpoint.ActivitySummary) {
       requireAdministrator(context);
+      if (requestIsMutating(context.request)) {
+        requireCsrfToken(context);
+      }
       const days = await dependencies.activityLogger.dailyCounts(14);
       const queued = await dependencies.deliveryService.queuedCount();
       const attentionEvents = await dependencies.activityLogger.attentionEvents();
@@ -376,6 +385,9 @@ export function createWebServer(dependencies: {
 
     if (request.method === "GET" && pathName === ApiEndpoint.ActivityAttention) {
       requireAdministrator(context);
+      if (requestIsMutating(context.request)) {
+        requireCsrfToken(context);
+      }
       sendJson(response, 200, {
         events: await dependencies.activityLogger.attentionEvents(),
         messages: await dependencies.deliveryService.listFailedEmail()
@@ -385,6 +397,9 @@ export function createWebServer(dependencies: {
 
     if (request.method === "POST" && pathName === ApiEndpoint.ActivityAttentionReset) {
       requireAdministrator(context);
+      if (requestIsMutating(context.request)) {
+        requireCsrfToken(context);
+      }
       const acknowledgedAt = await dependencies.activityLogger.acknowledgeAttention();
       sendJson(response, 200, { acknowledgedAt });
       return true;
@@ -392,6 +407,9 @@ export function createWebServer(dependencies: {
 
     if (request.method === "GET" && pathName === ApiEndpoint.Activity) {
       requireAdministrator(context);
+      if (requestIsMutating(context.request)) {
+        requireCsrfToken(context);
+      }
       const events = await dependencies.activityLogger.query({
         protocol: url.searchParams.get("protocol") || "",
         result: url.searchParams.get("result") || "",
@@ -404,12 +422,18 @@ export function createWebServer(dependencies: {
 
     if (request.method === "GET" && pathName === ApiEndpoint.FailedEmail) {
       requireAdministrator(context);
+      if (requestIsMutating(context.request)) {
+        requireCsrfToken(context);
+      }
       sendJson(response, 200, { messages: await dependencies.deliveryService.listFailedEmail() });
       return true;
     }
 
     if (request.method === "POST" && pathName === ApiEndpoint.FailedEmailResend) {
       requireAdministrator(context);
+      if (requestIsMutating(context.request)) {
+        requireCsrfToken(context);
+      }
       if (!Array.isArray(context.body.identifiers)) {
         throw new HttpError(400, "Choose the failed email to resend");
       }
@@ -420,12 +444,18 @@ export function createWebServer(dependencies: {
 
     if (request.method === "GET" && pathName === ApiEndpoint.Mailboxes) {
       requireAdministrator(context);
+      if (requestIsMutating(context.request)) {
+        requireCsrfToken(context);
+      }
       sendJson(response, 200, { mailboxes: await dependencies.accountRepository.listAccounts() });
       return true;
     }
 
     if (request.method === "POST" && pathName === ApiEndpoint.Mailboxes) {
       requireAdministrator(context);
+      if (requestIsMutating(context.request)) {
+        requireCsrfToken(context);
+      }
       if (!organization) {
         throw new HttpError(409, "Set up the company domain first");
       }
@@ -443,6 +473,9 @@ export function createWebServer(dependencies: {
 
     if (request.method === "POST" && pathName === ApiEndpoint.MailboxPassword) {
       const administrator = requireAdministrator(context);
+      if (requestIsMutating(context.request)) {
+        requireCsrfToken(context);
+      }
       const updated = await dependencies.accountRepository.replacePassword(
         normalizeAddress(context.body.address),
         textValue(context.body.password)
@@ -466,6 +499,9 @@ export function createWebServer(dependencies: {
 
     if (request.method === "POST" && pathName === ApiEndpoint.MailboxAccess) {
       const administrator = requireAdministrator(context);
+      if (requestIsMutating(context.request)) {
+        requireCsrfToken(context);
+      }
       const address = normalizeAddress(context.body.address);
       const disabled = context.body.disabled === true;
       if (disabled && address === administrator.address) {
@@ -493,6 +529,9 @@ export function createWebServer(dependencies: {
 
     if (request.method === "GET" && pathName === ApiEndpoint.Settings) {
       requireAdministrator(context);
+      if (requestIsMutating(context.request)) {
+        requireCsrfToken(context);
+      }
       const settings = await dependencies.settingsRepository.read();
       sendJson(response, 200, { settings: dependencies.settingsRepository.present(settings) });
       return true;
@@ -500,6 +539,9 @@ export function createWebServer(dependencies: {
 
     if (request.method === "PUT" && pathName === ApiEndpoint.Settings) {
       requireAdministrator(context);
+      if (requestIsMutating(context.request)) {
+        requireCsrfToken(context);
+      }
       const relay = context.body.relay;
       const relayRecord = relay && typeof relay === "object" ? (relay as Record<string, unknown>) : {};
       const settings = await dependencies.settingsRepository.update({
@@ -533,6 +575,9 @@ export function createWebServer(dependencies: {
 
     if (pathName === ApiEndpoint.AddressRoutes && request.method === "GET") {
       requireAdministrator(context);
+      if (requestIsMutating(context.request)) {
+        requireCsrfToken(context);
+      }
       if (!organization) {
         throw new HttpError(409, "Create the company first");
       }
@@ -542,6 +587,9 @@ export function createWebServer(dependencies: {
 
     if (pathName.startsWith(ApiEndpoint.AddressRoutes)) {
       requireAdministrator(context);
+      if (requestIsMutating(context.request)) {
+        requireCsrfToken(context);
+      }
       if (!organization) {
         throw new HttpError(409, "Create the company first");
       }
@@ -612,12 +660,18 @@ export function createWebServer(dependencies: {
 
     if (request.method === "GET" && pathName === ApiEndpoint.Backup) {
       requireAdministrator(context);
+      if (requestIsMutating(context.request)) {
+        requireCsrfToken(context);
+      }
       sendJson(response, 200, { backups: await listStorageBackups(dependencies.configuration.storageDirectory) });
       return true;
     }
 
     if (request.method === "POST" && pathName === ApiEndpoint.Backup) {
       requireAdministrator(context);
+      if (requestIsMutating(context.request)) {
+        requireCsrfToken(context);
+      }
       if (isRestoreInProgress()) {
         throw new HttpError(409, "A restore is already in progress");
       }
@@ -628,6 +682,9 @@ export function createWebServer(dependencies: {
 
     if (request.method === "DELETE" && pathName === ApiEndpoint.Backup) {
       requireAdministrator(context);
+      if (requestIsMutating(context.request)) {
+        requireCsrfToken(context);
+      }
       if (isRestoreInProgress()) {
         throw new HttpError(409, "A restore is already in progress");
       }
@@ -649,6 +706,9 @@ export function createWebServer(dependencies: {
 
     if (request.method === "POST" && pathName === ApiEndpoint.BackupRestore) {
       requireAdministrator(context);
+      if (requestIsMutating(context.request)) {
+        requireCsrfToken(context);
+      }
       if (!tryBeginRestore()) {
         throw new HttpError(409, "A restore is already in progress");
       }
@@ -675,6 +735,9 @@ export function createWebServer(dependencies: {
 
     if (request.method === "GET" && pathName === ApiEndpoint.Certificate) {
       requireAdministrator(context);
+      if (requestIsMutating(context.request)) {
+        requireCsrfToken(context);
+      }
       const settings = await dependencies.settingsRepository.read();
       const company = await dependencies.organizationRepository.read();
       sendJson(response, 200, {
@@ -687,6 +750,9 @@ export function createWebServer(dependencies: {
 
     if (request.method === "POST" && pathName === ApiEndpoint.Certificate) {
       requireAdministrator(context);
+      if (requestIsMutating(context.request)) {
+        requireCsrfToken(context);
+      }
       const certificate = await dependencies.replaceCertificate(
         textValue(context.body.certificate),
         textValue(context.body.privateKey),
@@ -710,6 +776,9 @@ export function createWebServer(dependencies: {
 
     if (request.method === "POST" && pathName === ApiEndpoint.CertificateAcmeIssue) {
       requireAdministrator(context);
+      if (requestIsMutating(context.request)) {
+        requireCsrfToken(context);
+      }
       if (!dependencies.issueAcmeCertificate) {
         throw new HttpError(503, "Let’s Encrypt is not available on this server");
       }
@@ -743,6 +812,9 @@ export function createWebServer(dependencies: {
 
     if (request.method === "POST" && pathName === ApiEndpoint.CertificateAcmeRenew) {
       requireAdministrator(context);
+      if (requestIsMutating(context.request)) {
+        requireCsrfToken(context);
+      }
       if (!dependencies.renewAcmeCertificate) {
         throw new HttpError(503, "Let’s Encrypt is not available on this server");
       }
@@ -779,6 +851,9 @@ export function createWebServer(dependencies: {
     }
 
     const account = requireAccount(context);
+    if (requestIsMutating(context.request)) {
+      requireCsrfToken(context);
+    }
 
     if (request.method === "GET" && pathName === ApiEndpoint.MailClientSettings) {
       if (!organization) {
@@ -823,9 +898,9 @@ export function createWebServer(dependencies: {
       }
       const updated = await dependencies.accountRepository.replacePassword(account.address, textValue(context.body.password));
       await dependencies.sessionRepository.removeForAddress(updated.address);
-      const identifier = await dependencies.sessionRepository.create(updated.address, updated.role);
+      const { identifier, csrfToken } = await dependencies.sessionRepository.create(updated.address, updated.role);
       writeSessionCookie(response, identifier, connectionIsSecure(request));
-      sendJson(response, 200, { account: updated });
+      sendJson(response, 200, { account: updated, csrfToken });
       return true;
     }
 
@@ -1110,7 +1185,7 @@ export function createWebServer(dependencies: {
         (request.method === "DELETE" && pathName !== ApiEndpoint.Backup)
           ? {}
           : await readJsonBody(request);
-      const handled = await route({ request, response, url, account, body });
+      const handled = await route({ request, response, url, account, body, session });
       if (handled) {
         return;
       }

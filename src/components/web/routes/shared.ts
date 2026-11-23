@@ -1,6 +1,6 @@
 import type http from "node:http";
 import tls from "node:tls";
-import { randomBytes } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { MessageRecord } from "../../message/interfaces/mailTypes.js";
 import type { PublicAccount } from "../../account/interfaces/accountRecord.js";
 import { AccountRole } from "../../account/enums/accountRole.js";
@@ -19,7 +19,7 @@ export function writeSessionCookie(response: http.ServerResponse, identifier: st
 
 export function cookieLine(name: string, value: string, secure: boolean, maxAge: number): string {
   const secureFlag = secure ? "; Secure" : "";
-  return `${name}=${encodeURIComponent(value)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}${secureFlag}`;
+  return `${name}=${encodeURIComponent(value)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}${secureFlag}`;
 }
 
 export function readCookies(request: http.IncomingMessage): Record<string, string> {
@@ -234,4 +234,24 @@ export function requireAdministrator(context: ServerRequest): PublicAccount {
     throw new HttpError(403, "Administrator access is required");
   }
   return account;
+}
+
+export function requestIsMutating(request: http.IncomingMessage): boolean {
+  const method = request.method || "GET";
+  return method !== "GET" && method !== "HEAD";
+}
+
+export function requireCsrfToken(context: ServerRequest): void {
+  requireAccount(context);
+  const header = context.request.headers["x-csrf-token"];
+  const supplied = Array.isArray(header) ? header[0] : header || "";
+  const expected = context.session?.csrfToken || "";
+  if (!supplied || !expected || supplied.length !== expected.length) {
+    throw new HttpError(403, "Invalid or missing CSRF token");
+  }
+  const suppliedBytes = Buffer.from(supplied, "utf8");
+  const expectedBytes = Buffer.from(expected, "utf8");
+  if (suppliedBytes.length !== expectedBytes.length || !timingSafeEqual(suppliedBytes, expectedBytes)) {
+    throw new HttpError(403, "Invalid or missing CSRF token");
+  }
 }

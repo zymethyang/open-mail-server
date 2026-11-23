@@ -5,7 +5,7 @@ import tls from "node:tls";
 import type { ServerCertificate } from "./interfaces/serverCertificate.js";
 import { secureOptions } from "../protocol/utils/transportSecurity.js";
 
-const channel = new BroadcastChannel("email-server-certificate");
+const channel = new BroadcastChannel("open-mail-server-certificate");
 (channel as BroadcastChannel & { unref(): void }).unref();
 
 export function publishCertificateReplacement(): void {

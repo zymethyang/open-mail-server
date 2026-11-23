@@ -9,7 +9,7 @@ import { ApiEndpoint } from "./components/web/enums/apiEndpoint.js";
 import { startEmailServer } from "./components/emailServer/index.js";
 import { parseRawMessage } from "./components/mime/index.js";
 
-const storageDirectory = await mkdtemp(path.join(os.tmpdir(), "email-server-"));
+const storageDirectory = await mkdtemp(path.join(os.tmpdir(), "open-mail-server-"));
 const base = loadConfiguration();
 const configuration = {
   ...base,

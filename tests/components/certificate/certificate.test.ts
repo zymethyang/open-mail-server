@@ -10,7 +10,7 @@ import { generateAuthoritySignedCertificate, generateSelfSignedCertificate } fro
 
 describe("certificate logic", () => {
   it("creates a certificate the server can load again", async () => {
-    const storageDirectory = await mkdtemp(path.join(os.tmpdir(), "email-server-certificate-"));
+    const storageDirectory = await mkdtemp(path.join(os.tmpdir(), "open-mail-server-certificate-"));
     try {
       const loaded = await loadCertificate(storageDirectory, ["acme.test"]);
       const again = await loadCertificate(storageDirectory, ["other.test"]);
@@ -27,7 +27,7 @@ describe("certificate logic", () => {
   });
 
   it("stores an uploaded certificate and rejects a key that does not match", async () => {
-    const storageDirectory = await mkdtemp(path.join(os.tmpdir(), "email-server-certificate-"));
+    const storageDirectory = await mkdtemp(path.join(os.tmpdir(), "open-mail-server-certificate-"));
     try {
       await loadCertificate(storageDirectory, ["localhost"]);
       const generated = generateSelfSignedCertificate(["mail.acme.test"]);
@@ -51,7 +51,7 @@ describe("certificate logic", () => {
     assert.match(parsed.subjectAltName || "", /DNS:acme\.test/);
     assert.match(parsed.subjectAltName || "", /IP Address:192\.168\.1\.20/);
     assert.match(parsed.subjectAltName || "", /IP Address:127\.0\.0\.1/);
-    const storageDirectory = await mkdtemp(path.join(os.tmpdir(), "email-server-certificate-"));
+    const storageDirectory = await mkdtemp(path.join(os.tmpdir(), "open-mail-server-certificate-"));
     try {
       const created = await loadCertificate(storageDirectory, ["localhost"]);
       const storedBefore = await readFile(path.join(storageDirectory, "certificates", "certificate.pem"), "utf8");
@@ -87,7 +87,7 @@ describe("certificate logic", () => {
       /Include the intermediate certificates/
     );
 
-    const storageDirectory = await mkdtemp(path.join(os.tmpdir(), "email-server-certificate-"));
+    const storageDirectory = await mkdtemp(path.join(os.tmpdir(), "open-mail-server-certificate-"));
     try {
       const separate = await storeCertificateMaterial(storageDirectory, issued.certificate, issued.privateKey, issued.intermediateCertificate);
       assert.equal(separate.selfSigned, false);

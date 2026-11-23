@@ -1,6 +1,6 @@
 import { ApiEndpoint } from "../enums/apiEndpoint.js";
 import { watchSignedInMailbox } from "../components/mailbox/liveMailbox.js";
-import { requestJson } from "../http/jsonClient.js";
+import { requestJson, setCsrfToken } from "../http/jsonClient.js";
 import { homePath } from "./consoleAccess.js";
 import type { Bootstrap } from "../interfaces/models.js";
 import { renderRoute } from "../router.js";
@@ -13,6 +13,7 @@ import { element } from "../utils/element.js";
 export async function loadBootstrap(): Promise<void> {
   const previousAddress = applicationState.bootstrap?.account?.address || "";
   applicationState.bootstrap = await requestJson<Bootstrap>(ApiEndpoint.Bootstrap);
+  setCsrfToken(applicationState.bootstrap.csrfToken || "");
   const nextAddress = applicationState.bootstrap.account?.address || "";
   if (previousAddress !== nextAddress) {
     applicationState.clearSessionView();

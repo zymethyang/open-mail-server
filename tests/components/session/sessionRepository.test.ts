@@ -14,29 +14,31 @@ describe("session repository interface", () => {
     try {
       assert.equal(await repository.read("not-a-session"), null);
       assert.equal(await repository.read(""), null);
-      const identifier = await repository.create("Ada@Acme.Test", AccountRole.Administrator);
-      assert.match(identifier, /^[a-f0-9]{48}$/);
-      const session = await repository.read(identifier);
+      const created = await repository.create("Ada@Acme.Test", AccountRole.Administrator);
+      assert.match(created.identifier, /^[a-f0-9]{48}$/);
+      assert.match(created.csrfToken, /^[a-f0-9]{64}$/);
+      const session = await repository.read(created.identifier);
       assert.equal(session?.address, "Ada@Acme.Test");
       assert.equal(session?.role, AccountRole.Administrator);
+      assert.equal(session?.csrfToken, created.csrfToken);
       assert.equal((session?.expiresAt || 0) > Date.now(), true);
 
       const member = await repository.create("bea@acme.test", AccountRole.Member);
       await repository.removeForAddress("  BEA@ACME.TEST  ");
-      assert.equal(await repository.read(member), null);
-      assert.notEqual(await repository.read(identifier), null);
-      await repository.remove(identifier);
-      assert.equal(await repository.read(identifier), null);
+      assert.equal(await repository.read(member.identifier), null);
+      assert.notEqual(await repository.read(created.identifier), null);
+      await repository.remove(created.identifier);
+      assert.equal(await repository.read(created.identifier), null);
       await repository.remove("");
       await repository.removeForAddress("");
 
       const expired = await repository.create("ada@acme.test", AccountRole.Administrator);
       const stored = await readJson<{ sessions: Record<string, SessionRecord> }>(path.join(storageDirectory, "sessions.json"));
-      stored.sessions[expired].expiresAt = Date.now() - 1000;
+      stored.sessions[expired.identifier].expiresAt = Date.now() - 1000;
       await writeJson(path.join(storageDirectory, "sessions.json"), stored);
-      assert.equal(await repository.read(expired), null);
+      assert.equal(await repository.read(expired.identifier), null);
       const afterExpiry = await readJson<{ sessions: Record<string, SessionRecord> }>(path.join(storageDirectory, "sessions.json"));
-      assert.equal(afterExpiry.sessions[expired], undefined);
+      assert.equal(afterExpiry.sessions[expired.identifier], undefined);
     } finally {
       await removeTemporaryStorage(storageDirectory);
     }
