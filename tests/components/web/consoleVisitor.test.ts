@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import os from "node:os";
 import { describe, it } from "node:test";
-import { consoleAllowsVisitor, consoleVisitorIsLocal } from "../../../src/components/web/utils/consoleVisitor.js";
 import { requestJson, startWebConsole } from "../../support/webConsole.js";
 
 function otherLocalAddress(): string {
@@ -16,41 +15,43 @@ function otherLocalAddress(): string {
   return "";
 }
 
-describe("console visitor", () => {
-  it("treats only this machine as local before an account exists", () => {
-    assert.equal(consoleVisitorIsLocal("127.0.0.1"), true);
-    assert.equal(consoleVisitorIsLocal("::1"), true);
-    assert.equal(consoleVisitorIsLocal("::ffff:127.0.0.1"), true);
-    assert.equal(consoleVisitorIsLocal("127.0.0.2"), false);
-    assert.equal(consoleVisitorIsLocal("203.0.113.10"), false);
-    assert.equal(consoleAllowsVisitor("203.0.113.10", false), false);
-    assert.equal(consoleAllowsVisitor("203.0.113.10", true), true);
-    assert.equal(consoleAllowsVisitor("127.0.0.1", false), true);
+function company(): Record<string, string> {
+  return {
+    organizationName: "Acme",
+    domain: "acme.test",
+    publicAddress: "1.2.3.4",
+    displayName: "Ada Admin",
+    address: "ada@acme.test",
+    password: "correct-horse"
+  };
+}
+
+describe("console visitor (no gate)", () => {
+  it("lets a local visitor complete setup on first run, then returns 409", async () => {
+    const consoleServer = await startWebConsole({ listenHost: "127.0.0.1" });
+    try {
+      const localFirst = await requestJson(consoleServer.baseUrl, "POST", "/api/setup", company(), "", { connection: "close" });
+      assert.equal(localFirst.status, 201);
+      const localSecond = await requestJson(consoleServer.baseUrl, "POST", "/api/setup", company(), "", { connection: "close" });
+      assert.equal(localSecond.status, 409);
+      assert.match(String(localSecond.payload.error), /already set up/);
+    } finally {
+      await consoleServer.stop();
+    }
   });
 
-  it("refuses another computer until the company account exists", async () => {
+  it("lets a remote visitor complete setup on first run, then returns 409", async () => {
     const address = otherLocalAddress();
-    assert.ok(address, "This computer needs a network address to prove a remote visit is refused");
+    assert.ok(address, "This computer needs a network address to prove a remote visit can set up");
     const consoleServer = await startWebConsole({ listenHost: "0.0.0.0" });
     const port = new URL(consoleServer.baseUrl).port;
     const remoteUrl = `http://${address}:${port}`;
-    const company = {
-      organizationName: "Acme",
-      domain: "acme.test",
-      publicAddress: "1.2.3.4",
-      displayName: "Ada Admin",
-      address: "ada@acme.test",
-      password: "correct-horse"
-    };
     try {
-      const remote = await requestJson(remoteUrl, "POST", "/api/setup", company, "", { connection: "close" });
-      assert.equal(remote.status, 403);
-      assert.match(String(remote.payload.error), /Create the company from this machine/);
-
-      const local = await requestJson(consoleServer.baseUrl, "POST", "/api/setup", company, "", { connection: "close" });
-      assert.equal(local.status, 201);
-      const remoteAfter = await requestJson(remoteUrl, "POST", "/api/setup", company, "", { connection: "close" });
-      assert.equal(remoteAfter.status, 409);
+      const remoteFirst = await requestJson(remoteUrl, "POST", "/api/setup", company(), "", { connection: "close" });
+      assert.equal(remoteFirst.status, 201);
+      const remoteSecond = await requestJson(remoteUrl, "POST", "/api/setup", company(), "", { connection: "close" });
+      assert.equal(remoteSecond.status, 409);
+      assert.match(String(remoteSecond.payload.error), /already set up/);
     } finally {
       await consoleServer.stop();
     }

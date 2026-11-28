@@ -21,7 +21,6 @@ import type { DeliveryService } from "../delivery/interfaces/delivery.js";
 import { checkPublicPorts } from "../publicPort/index.js";
 import type { OrganizationRecord } from "../organization/interfaces/organizationRecord.js";
 import { openDomainKey } from "../domainKey/index.js";
-import { consoleAllowsVisitor } from "./utils/consoleVisitor.js";
 import { createDnsGuide, formatDnsGuideForTerminal } from "./utils/dnsGuide.js";
 import { AddressRouteRepository } from "../addressRoute/index.js";
 import {
@@ -1148,10 +1147,6 @@ export function createWebServer(dependencies: {
         const failed = dependencies.listenerStatus.filter((listener) => !listener.started);
         sendJson(response, failed.length ? 503 : 200, { ok: failed.length === 0 });
         return;
-      }
-      const companyAccountExists = await dependencies.accountRepository.hasAccounts();
-      if (!consoleAllowsVisitor(request.socket.remoteAddress || "", companyAccountExists)) {
-        throw new HttpError(403, "Create the company from this machine before opening the console from another computer");
       }
       const host = request.headers.host || `127.0.0.1:${dependencies.configuration.webPort}`;
       const url = new URL(request.url || "/", `http://${host}`);

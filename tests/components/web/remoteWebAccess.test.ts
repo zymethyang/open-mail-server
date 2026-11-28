@@ -18,7 +18,7 @@ describe("web console from another computer", { concurrency: 1 }, () => {
     }
   });
 
-  it("serves the console, signs in, and keeps a session when the address is not this machine", async () => {
+  it("lets a visitor from another computer set up the console and signs in on first run", async () => {
     storageDirectory = await createTemporaryStorage();
     const configuration = testConfiguration(storageDirectory);
     configuration.host = "0.0.0.0";
@@ -31,9 +31,10 @@ describe("web console from another computer", { concurrency: 1 }, () => {
     baseUrl = `http://${address}:${listener.port}`;
     const localUrl = `http://127.0.0.1:${listener.port}`;
 
-    const blocked = await fetch(`${baseUrl}/`);
-    assert.equal(blocked.status, 403);
-    const blockedSetup = await fetch(`${baseUrl}/api/setup`, {
+    const consoleBeforeSetup = await fetch(`${baseUrl}/`);
+    assert.equal(consoleBeforeSetup.status, 200);
+
+    const setup = await fetch(`${baseUrl}/api/setup`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Origin: baseUrl },
       body: JSON.stringify({
@@ -45,9 +46,9 @@ describe("web console from another computer", { concurrency: 1 }, () => {
         password: "correct-horse"
       })
     });
-    assert.equal(blockedSetup.status, 403);
+    assert.equal(setup.status, 201);
 
-    const setup = await fetch(`${localUrl}/api/setup`, {
+    const setupAgain = await fetch(`${localUrl}/api/setup`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Origin: localUrl },
       body: JSON.stringify({
@@ -59,7 +60,9 @@ describe("web console from another computer", { concurrency: 1 }, () => {
         password: "correct-horse"
       })
     });
-    assert.equal(setup.status, 201);
+    assert.equal(setupAgain.status, 409);
+    const setupAgainBody = (await setupAgain.json()) as { error?: string };
+    assert.match(setupAgainBody.error || "", /already set up/);
 
     const home = await fetch(`${baseUrl}/`);
     const html = await home.text();
